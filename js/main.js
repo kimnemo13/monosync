@@ -95,6 +95,95 @@
     this.value = "";
   });
 
+  // ---------- 복사·붙여넣기 ----------
+  // 프리미어가 ⌘C/⌘V 등을 가로채서 패널 입력칸에서 안 되던 문제 → 패널이 직접 받아 처리
+  function activeField() {
+    var el = document.activeElement;
+    return el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && /^(text|number|search)$/.test(el.type))) ? el : null;
+  }
+  function insertText(el, text) {
+    el.focus();
+    var ok = false;
+    try { ok = document.execCommand("insertText", false, text); } catch (e) {}   // 되돌리기(⌘Z) 기록이 남는 방식
+    if (!ok) {
+      var s = el.selectionStart, e2 = el.selectionEnd;
+      el.setRangeText(text, s, e2, "end");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
+  function selected(el) { return el.value.substring(el.selectionStart, el.selectionEnd); }
+  function doCopy(el, cut) {
+    var t = selected(el);
+    if (!t) return false;
+    E.clipWrite(t);
+    if (cut) insertText(el, "");
+    return true;
+  }
+  function doPaste(el) {
+    var t = E.clipRead();
+    if (!t) { status("클립보드가 비어 있어요.", "warn"); return; }
+    if (el.tagName === "INPUT") t = t.replace(/\s+/g, " ").trim();
+    insertText(el, t.replace(/\r\n?/g, "\n"));
+  }
+
+  (function registerKeys() {
+    if (!window.__adobe_cep__ || !window.__adobe_cep__.registerKeyEventsInterest) return;
+    // 맥 키코드: A=0 Z=6 X=7 C=8 V=9
+    var keys = [0, 6, 7, 8, 9].map(function (k) { return { keyCode: k, metaKey: true }; });
+    keys.push({ keyCode: 6, metaKey: true, shiftKey: true });
+    window.__adobe_cep__.registerKeyEventsInterest(JSON.stringify(keys));
+  })();
+  document.addEventListener("keydown", function (ev) {
+    var el = activeField();
+    if (!el || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return;
+    var k = (ev.key || "").toLowerCase(), code = ev.code || "";
+    var is = function (ch) { return k === ch || code === "Key" + ch.toUpperCase(); };
+    if (is("v")) { ev.preventDefault(); doPaste(el); }
+    else if (is("c")) { ev.preventDefault(); doCopy(el, false); }
+    else if (is("x")) { ev.preventDefault(); doCopy(el, true); }
+    else if (is("a")) { ev.preventDefault(); el.select(); }
+    else if (is("z")) { ev.preventDefault(); try { document.execCommand(ev.shiftKey ? "redo" : "undo"); } catch (e) {} }
+  }, true);
+
+  // 우클릭 메뉴
+  (function contextMenu() {
+    if (!window.__adobe_cep__ || !window.__adobe_cep__.invokeAsync) return;
+    var lastField = null;
+    document.addEventListener("contextmenu", function () { lastField = activeField(); }, true);
+    var menu = { menu: [
+      { id: "cut", label: "잘라내기", enabled: true, checkable: false, checked: false },
+      { id: "copy", label: "복사", enabled: true, checkable: false, checked: false },
+      { id: "paste", label: "붙여넣기", enabled: true, checkable: false, checked: false },
+      { id: "sep", label: "---" },
+      { id: "all", label: "전체 선택", enabled: true, checkable: false, checked: false }
+    ] };
+    window.__adobe_cep__.invokeAsync("setContextMenuByJSON", JSON.stringify(menu), function (id) {
+      var el = lastField || activeField() || $("text");
+      if (id === "cut") doCopy(el, true);
+      else if (id === "copy") doCopy(el, false);
+      else if (id === "paste") doPaste(el);
+      else if (id === "all") { el.focus(); el.select(); }
+    });
+  })();
+
+  $("btnPaste").addEventListener("click", function () {
+    var el = $("text");
+    if (!el.value.trim()) { el.focus(); doPaste(el); status("붙여넣었어요."); return; }
+    el.focus(); doPaste(el); status("커서 위치에 붙여넣었어요.");
+  });
+  $("btnCopy").addEventListener("click", function () {
+    var el = $("text");
+    if (!el.value) return;
+    var t = selected(el) || el.value;
+    status(E.clipWrite(t) ? (selected(el) ? "선택한 부분을 복사했어요." : "자막 텍스트 전체를 복사했어요.") : "복사에 실패했어요.", "ok");
+  });
+  $("btnClear").addEventListener("click", function () {
+    var el = $("text");
+    if (!el.value) return;
+    el.focus(); el.select(); insertText(el, "");                    // ⌘Z로 되돌릴 수 있게
+    status("지웠어요. 잘못 지웠으면 ⌘Z로 되돌릴 수 있어요.");
+  });
+
   // ---------- 2) 클립 ----------
   function renderClips() {
     var box = $("clips"); box.innerHTML = "";

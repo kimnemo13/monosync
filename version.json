@@ -1,7 +1,7 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "repo": "kimnemo13/monosync",
-  "notes": "첫 버전: 선택한 클립 대사 인식 → 자막 텍스트 맞춤 → 캡션 트랙으로 넣기",
+  "notes": "자막 텍스트 칸 복사·붙여넣기(⌘C/⌘V/⌘X/⌘A/⌘Z, 우클릭 메뉴, 붙여넣기·복사·지우기 버튼)",
   "files": [
     "index.html",
     "js/main.js",

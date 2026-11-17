@@ -108,11 +108,20 @@
     try { fs.readdirSync(CACHE).forEach(function (f) { try { fs.unlinkSync(path.join(CACHE, f)); } catch (e) {} }); } catch (e) {}
   }
 
+  // 맥 클립보드 (프리미어 패널 안에서는 브라우저 클립보드가 막혀 있어 pbcopy/pbpaste 사용)
+  var CLIP_ENV = Object.assign({}, process.env, { LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" });
+  function clipRead() {
+    try { return cp.execFileSync("/usr/bin/pbpaste", [], { env: CLIP_ENV }).toString("utf8"); } catch (e) { return ""; }
+  }
+  function clipWrite(text) {
+    try { cp.execFileSync("/usr/bin/pbcopy", [], { env: CLIP_ENV, input: Buffer.from(String(text), "utf8") }); return true; } catch (e) { return false; }
+  }
+
   function writeText(file, text) { mkdirp(path.dirname(file)); fs.writeFileSync(file, text, "utf8"); return file; }
   function readText(file) { return fs.readFileSync(file, "utf8"); }
 
   window.MSEngine = {
     tools: tools, transcribe: transcribe, cancel: cancel, clearCache: clearCache,
-    writeText: writeText, readText: readText, dataDir: DATA, home: HOME, path: path
+    writeText: writeText, readText: readText, clipRead: clipRead, clipWrite: clipWrite, dataDir: DATA, home: HOME, path: path
   };
 })();
