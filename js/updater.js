@@ -107,6 +107,10 @@
       .then(function (c) {
         sha = c.sha;
         return get("https://raw.githubusercontent.com/" + repo + "/" + sha + "/version.json", true);
+      }, function () {
+        // GitHub API 사용량 제한(시간당 60회) 등으로 막히면 파일 주소로 바로 확인
+        sha = BRANCH;
+        return get("https://raw.githubusercontent.com/" + repo + "/" + BRANCH + "/version.json?t=" + Date.now(), true);
       })
       .then(function (remote) {
         if (cmp(remote.version, local.version) <= 0) return { status: "none", version: local.version };

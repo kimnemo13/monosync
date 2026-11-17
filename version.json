@@ -1,7 +1,7 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "repo": "kimnemo13/monosync",
-  "notes": "업데이트 · 버전 칸 추가(업데이트 확인, 자동 업데이트 켜기/끄기, 이전 버전 설치) + 자막 칸 복사·붙여넣기",
+  "notes": "업데이트 확인이 GitHub 사용량 제한에 막혀도 받아지도록 보강",
   "files": [
     "index.html",
     "js/main.js",
