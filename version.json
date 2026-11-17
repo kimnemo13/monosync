@@ -1,7 +1,7 @@
 {
-  "version": "1.0.3",
+  "version": "1.1.0",
   "repo": "kimnemo13/monosync",
-  "notes": "업데이트 확인이 GitHub 사용량 제한에 막혀도 받아지도록 보강",
+  "notes": "새 화면: 자막 텍스트 → 자막 넣을 V트랙·음성 A트랙 선택 → 싱크 한 번으로 내 템플릿(.mogrt) 그래픽 클립 배치",
   "files": [
     "index.html",
     "js/main.js",

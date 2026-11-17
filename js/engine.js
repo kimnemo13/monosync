@@ -104,6 +104,109 @@
       }, function (e) { try { fs.unlinkSync(wav); } catch (e2) {} throw e; });
   }
 
+  // ---------- 음성 트랙 전체 받아쓰기 ----------
+  // clips: [{path,start,end,inPoint,outPoint,speed}] (타임라인 순)
+  // 클립 소리를 0.4초 틈을 두고 이어 붙여 whisper를 한 번만 돌리고, 단어 시간을 타임라인 시간으로 되돌린다.
+  var SR = 16000, GAP = 0.4;
+  function atempoChain(sp) {
+    var f = [];
+    while (sp > 2.0) { f.push("atempo=2.0"); sp /= 2.0; }
+    while (sp < 0.5) { f.push("atempo=0.5"); sp /= 0.5; }
+    if (Math.abs(sp - 1) > 1e-3) f.push("atempo=" + sp.toFixed(4));
+    return f.join(",");
+  }
+  function extractPCM(ffmpeg, c, out) {
+    var spd = c.speed || 1;
+    var srcDur = Math.max(0.05, (c.end - c.start) * spd);        // 타임라인 길이 × 속도 = 원본에서 쓰는 길이
+    var args = ["-y", "-hide_banner", "-loglevel", "error", "-ss", c.inPoint.toFixed(3), "-t", srcDur.toFixed(3), "-i", c.path, "-vn"];
+    var af = atempoChain(spd);
+    if (af) args.push("-af", af);
+    args.push("-ac", "1", "-ar", String(SR), "-f", "s16le", "-c:a", "pcm_s16le", out);
+    return run(ffmpeg, args);
+  }
+  function wavHeader(bytes) {
+    var h = Buffer.alloc(44);
+    h.write("RIFF", 0); h.writeUInt32LE(36 + bytes, 4); h.write("WAVE", 8); h.write("fmt ", 12);
+    h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(SR, 24);
+    h.writeUInt32LE(SR * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(bytes, 40);
+    return h;
+  }
+  function transcribeTrack(clips, lang, preferModel, onProgress) {
+    var t = tools(preferModel);
+    if (!t.ffmpeg) return Promise.reject(new Error("ffmpeg가 없어요. install-mac.command를 다시 실행해 주세요."));
+    if (!t.whisper) return Promise.reject(new Error("whisper-cli가 없어요. install-mac.command를 다시 실행해 주세요."));
+    if (!t.model) return Promise.reject(new Error("음성 인식 모델이 없어요. install-mac.command를 다시 실행해 주세요."));
+    for (var i = 0; i < clips.length; i++) {
+      if (clips[i].reversed) return Promise.reject(new Error("거꾸로 재생한 음성 클립은 못 들어요: " + clips[i].name));
+      if (!fs.existsSync(clips[i].path)) return Promise.reject(new Error("원본 파일을 찾을 수 없어요: " + clips[i].path));
+    }
+    var sig = clips.map(function (c) {
+      var st = fs.statSync(c.path);
+      return [c.path, st.size, st.mtimeMs, c.start.toFixed(3), c.end.toFixed(3), c.inPoint.toFixed(3), (c.speed || 1).toFixed(3)].join(",");
+    }).join(";");
+    var key = crypto.createHash("sha1").update([sig, lang, path.basename(t.model), "track-v1"].join("|")).digest("hex").slice(0, 20);
+    mkdirp(CACHE);
+    var base = path.join(CACHE, key), jsonPath = base + ".json", mapPath = base + ".map.json", wav = base + ".wav";
+    if (fs.existsSync(jsonPath) && fs.existsSync(mapPath)) {
+      try {
+        onProgress(1, "저장해 둔 인식 결과 사용");
+        return Promise.resolve({ json: JSON.parse(fs.readFileSync(jsonPath, "utf8")), map: JSON.parse(fs.readFileSync(mapPath, "utf8")) });
+      } catch (e) {}
+    }
+    var parts = [], map = [], pos = 0, n = clips.length;
+    var chain = Promise.resolve();
+    clips.forEach(function (c, k) {
+      chain = chain.then(function () {
+        if (transcribeTrack.cancelled) throw new Error("중지했어요.");
+        onProgress(0.1 * k / n, "음성 클립 모으는 중… (" + (k + 1) + "/" + n + ")");
+        var pcm = base + "." + k + ".pcm";
+        return extractPCM(t.ffmpeg, c, pcm).then(function () {
+          var buf = fs.readFileSync(pcm); try { fs.unlinkSync(pcm); } catch (e) {}
+          var sec = buf.length / 2 / SR;
+          map.push({ pos: pos, len: sec, start: c.start });
+          parts.push(buf); pos += sec;
+          var gap = Buffer.alloc(Math.round(GAP * SR) * 2);         // 클립 사이 무음
+          parts.push(gap); pos += GAP;
+        });
+      });
+    });
+    return chain.then(function () {
+      var body = Buffer.concat(parts);
+      fs.writeFileSync(wav, Buffer.concat([wavHeader(body.length), body]));
+      onProgress(0.1, "대사 듣는 중… 0% (음성 " + Math.round(pos) + "초)");
+      var args = ["-m", t.model, "-f", wav, "-oj", "-of", base, "-ml", "1", "-sow", "-pp", "-l", lang || "auto"];
+      var heard = "";
+      return run(t.whisper, args, function (line) {
+        var m = /progress\s*=\s*(\d+)%/.exec(line);
+        if (m) onProgress(0.1 + 0.9 * (+m[1]) / 100, "대사 듣는 중… " + m[1] + "%" + (heard ? " · " + heard : ""));
+        var s = /^\[\d\d:\d\d:\d\d\.\d+ --> [^\]]+\]\s*(.*)$/.exec(line);
+        if (s && s[1]) heard = (heard + s[1]).slice(-24);
+      });
+    }).then(function () {
+      try { fs.unlinkSync(wav); } catch (e) {}
+      fs.writeFileSync(mapPath, JSON.stringify(map));
+      return { json: JSON.parse(fs.readFileSync(jsonPath, "utf8")), map: map };
+    }, function (e) { try { fs.unlinkSync(wav); } catch (e2) {} throw e; });
+  }
+  // 이어 붙인 오디오 위치(초) → 타임라인 초
+  function mapTime(map, p) {
+    var best = map[0];
+    for (var i = 0; i < map.length; i++) { if (map[i].pos <= p + 1e-6) best = map[i]; else break; }
+    if (!best) return p;
+    return best.start + Math.max(0, Math.min(p - best.pos, best.len));
+  }
+  function wordsFromTrack(res) {
+    var tr = (res.json && res.json.transcription) || [], out = [];
+    for (var i = 0; i < tr.length; i++) {
+      var tx = tr[i].text || "";
+      if (/^\s*[\[(].*[\])]\s*$/.test(tx)) continue;              // [음악] (웃음)
+      var a = tr[i].offsets.from / 1000, b = tr[i].offsets.to / 1000;
+      var t0 = mapTime(res.map, a), t1 = mapTime(res.map, Math.max(a, b - 0.001));
+      out.push({ t0: t0, t1: Math.max(t1, t0 + 0.02), text: tx });
+    }
+    return out;
+  }
+
   function clearCache() {
     try { fs.readdirSync(CACHE).forEach(function (f) { try { fs.unlinkSync(path.join(CACHE, f)); } catch (e) {} }); } catch (e) {}
   }
@@ -121,7 +224,8 @@
   function readText(file) { return fs.readFileSync(file, "utf8"); }
 
   window.MSEngine = {
-    tools: tools, transcribe: transcribe, cancel: cancel, clearCache: clearCache,
+    tools: tools, transcribe: transcribe, transcribeTrack: transcribeTrack, wordsFromTrack: wordsFromTrack, mapTime: mapTime,
+    cancel: function () { transcribeTrack.cancelled = true; cancel(); }, resetCancel: function () { transcribeTrack.cancelled = false; }, clearCache: clearCache,
     writeText: writeText, readText: readText, clipRead: clipRead, clipWrite: clipWrite, dataDir: DATA, home: HOME, path: path
   };
 })();
