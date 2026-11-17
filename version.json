@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "repo": "kimnemo13/monosync",
+  "notes": "첫 버전: 선택한 클립 대사 인식 → 자막 텍스트 맞춤 → 캡션 트랙으로 넣기",
+  "files": [
+    "index.html",
+    "js/main.js",
+    "js/align.js",
+    "js/engine.js",
+    "js/updater.js",
+    "jsx/host.jsx",
+    "CSXS/manifest.xml",
+    "install-mac.command",
+    "uninstall-mac.command",
+    "README.md",
+    "설치안내.txt"
+  ]
+}
