@@ -346,17 +346,60 @@
   $("btnClearCache").addEventListener("click", function () { E.clearCache(); status("저장해 둔 인식 결과를 지웠어요. 다음엔 새로 들어요."); });
 
   // ---------- 업데이트 ----------
-  function initUpdater() {
+  function updMsg(msg, kind) { var s = $("upd"); s.textContent = msg || ""; s.className = "status" + (kind ? " " + kind : ""); }
+  function showVer() {
+    var v = U ? U.localVersion() : "?", pin = U && U.pinned();
+    $("ver").textContent = "v" + v;
+    $("updVer").textContent = "지금 v" + v + (pin ? " · 버전 고정" : "");
+  }
+  function afterInstall(r) {
+    try { sessionStorage.setItem(LS + "justUpdated", JSON.stringify(r)); } catch (e) {}
+    if (r.needsRestart) updMsg("v" + r.version + " 설치 완료. 이번 변경은 프리미어를 껐다 켜야 적용돼요.", "ok");
+    else { updMsg("v" + r.version + " 설치 완료. 패널을 다시 불러와요…", "ok"); setTimeout(function () { location.reload(); }, 1200); }
+  }
+  function checkUpdate(manual) {
+    if (!U) { if (manual) updMsg("업데이트 기능을 불러오지 못했어요.", "err"); return; }
+    if (manual) updMsg("GitHub에서 확인 중…");
+    U.check(function (m) { updMsg(m); }, manual).then(function (r) {
+      if (r.status === "pinned") { updMsg("버전 고정 중이라 자동 업데이트를 건너뛰었어요 (v" + r.version + ")."); return; }
+      if (r.status === "none") { updMsg(manual ? "최신 버전이에요 (v" + r.version + ")." : "", "ok"); showVer(); return; }
+      afterInstall(r);
+    }).catch(function (e) { updMsg((manual ? "" : "자동 ") + "업데이트 확인 실패: " + e.message, "err"); });
+  }
+  function loadVersionList() {
     if (!U) return;
-    $("ver").textContent = "v" + U.localVersion();
-    if (!U.isAuto()) return;
-    U.check(function (m) { $("upd").textContent = m; }).then(function (r) {
-      if (r.status === "updated") {
-        $("upd").textContent = "v" + r.version + " 업데이트 완료" + (r.needsRestart ? " — 프리미어를 다시 켜 주세요." : "");
-        if (!r.needsRestart) setTimeout(function () { location.reload(); }, 1200);
-      } else if (r.status === "pinned") $("upd").textContent = "버전 고정됨 (v" + r.version + ")";
-      else $("upd").textContent = "";
-    }).catch(function () { $("upd").textContent = ""; });
+    var sel = $("selVersion");
+    U.listVersions().then(function (list) {
+      sel.innerHTML = "";
+      if (!list.length) { sel.innerHTML = '<option value="">(올라간 버전 없음)</option>'; return; }
+      list.forEach(function (tag, i) {
+        var o = document.createElement("option");
+        o.value = tag;
+        o.textContent = tag + (i === 0 ? " (최신)" : "") + (tag.replace(/^v/, "") === U.localVersion() ? " ← 지금" : "");
+        sel.appendChild(o);
+      });
+      sel.setAttribute("data-latest", list[0]);
+    }).catch(function (e) { sel.innerHTML = '<option value="">목록을 못 불러옴 (' + e.message + ')</option>'; });
+  }
+  function initUpdater() {
+    showVer();
+    try {
+      var j = JSON.parse(sessionStorage.getItem(LS + "justUpdated") || "null");
+      if (j) { sessionStorage.removeItem(LS + "justUpdated"); updMsg("v" + j.version + "로 업데이트됐어요" + (j.notes ? " — " + j.notes : ""), "ok"); }
+    } catch (e) {}
+    if (!U) { updMsg("업데이트 기능을 불러오지 못했어요.", "err"); return; }
+    $("chkAutoUpd").checked = U.isAuto();
+    $("chkAutoUpd").addEventListener("change", function () { U.setAuto(this.checked); updMsg(this.checked ? "자동 업데이트를 켰어요." : "자동 업데이트를 껐어요."); });
+    $("btnCheckUpd").addEventListener("click", function () { checkUpdate(true); });
+    $("btnInstallVer").addEventListener("click", function () {
+      var sel = $("selVersion"), tag = sel.value;
+      if (!tag) { updMsg("설치할 버전을 고르세요.", "err"); return; }
+      updMsg(tag + " 설치 중…");
+      U.installVersion(tag, tag === sel.getAttribute("data-latest"), function (m) { updMsg(m); })
+        .then(afterInstall).catch(function (e) { updMsg("설치 실패: " + e.message, "err"); });
+    });
+    loadVersionList();
+    if (U.isAuto()) checkUpdate(false);
   }
 
   // ---------- 시작 ----------
