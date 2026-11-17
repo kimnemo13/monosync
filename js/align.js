@@ -252,6 +252,7 @@
   }
 
   var api = { run: run, parseLines: parseLines, toSRT: toSRT, ts: ts, wordsFromWhisper: wordsFromWhisper, normChars: normChars };
+  // 프리미어 패널은 Node 기능이 켜져 있어 module도 있으므로, 화면(window)에는 항상 따로 걸어 둔다
+  if (typeof window !== "undefined") window.MSAlign = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
-  else root.MSAlign = api;
 })(typeof window !== "undefined" ? window : this);

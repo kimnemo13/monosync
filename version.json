@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "repo": "kimnemo13/monosync",
-  "notes": "새 화면: 자막 텍스트 → 자막 넣을 V트랙·음성 A트랙 선택 → 싱크 한 번으로 내 템플릿(.mogrt) 그래픽 클립 배치",
+  "notes": "패널이 열리자마자 멈추던 문제 수정(버전·업데이트·버튼이 안 되던 원인) + 오류가 나면 화면에 표시",
   "files": [
     "index.html",
     "js/main.js",
@@ -14,5 +14,13 @@
     "uninstall-mac.command",
     "README.md",
     "설치안내.txt"
+  ],
+  "versions": [
+    "1.1.1",
+    "1.1.0",
+    "1.0.3",
+    "1.0.2",
+    "1.0.1",
+    "1.0.0"
   ]
 }

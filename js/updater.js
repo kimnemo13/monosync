@@ -124,6 +124,11 @@
       return (brs || []).map(function (b) { var m = /^release-(\d+\.\d+\.\d+)$/.exec(b.name); return m ? "v" + m[1] : null; })
         .filter(function (n) { return !!n; })
         .sort(function (a, b) { return cmp(b, a); });
+    }, function () {
+      // GitHub API 사용량 제한에 막히면 version.json에 적어 둔 버전 목록 사용
+      return get("https://raw.githubusercontent.com/" + getRepo() + "/" + BRANCH + "/version.json?t=" + Date.now(), true).then(function (v) {
+        return (v.versions || [v.version]).map(function (x) { return "v" + String(x).replace(/^v/, ""); }).sort(function (a, b) { return cmp(b, a); });
+      });
     });
   }
 

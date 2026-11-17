@@ -3,6 +3,11 @@
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
   var E = window.MSEngine, A = window.MSAlign, U = window.MSUpdater;
+  window.addEventListener("error", function (ev) {
+    var s = document.getElementById("status");
+    if (s) { s.textContent = "[패널 오류] " + ev.message + " (" + String(ev.filename || "").split("/").pop() + ":" + ev.lineno + ") — 이 문구를 Claude에게 보내 주세요."; s.className = "status err"; }
+  });
+  if (!A || !E) { setTimeout(function () { var s = document.getElementById("status"); if (s) { s.textContent = "[패널 오류] " + (!A ? "align.js" : "engine.js") + "를 불러오지 못했어요."; s.className = "status err"; } }, 0); }
   var LS = "monosync.";
   var state = { info: null, v: -1, a: -1, range: "all", style: "gfx", result: null, placed: null, busy: false, words: null };
 
@@ -423,7 +428,14 @@
   }
 
   // ---------- 시작 ----------
-  $("text").value = load("text", "");
-  state.style = load("style", "gfx");
-  updateCount(); renderStyle(); checkTools(); refresh(); initUpdater();
+  // 업데이트를 맨 먼저 — 다른 부분에 오류가 나도 고친 버전을 받을 수 있게. 각 단계는 따로 보호.
+  function safe(name, fn) {
+    try { var r = fn(); if (r && r.catch) r.catch(function (e) { status("[" + name + "] " + (e.message || e), "err"); }); }
+    catch (e) { status("[" + name + " 오류] " + (e.message || e) + " — 이 문구를 Claude에게 보내 주세요.", "err"); }
+  }
+  safe("업데이트", initUpdater);
+  safe("텍스트", function () { $("text").value = load("text", ""); updateCount(); });
+  safe("스타일", function () { state.style = load("style", "gfx"); renderStyle(); });
+  safe("설치 확인", checkTools);
+  safe("시퀀스", refresh);
 })();
