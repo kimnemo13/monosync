@@ -307,6 +307,14 @@ function MS_write(vIdx, s, e, idx, rawEnc) {
         return '{"ok":true,"back":' + MS_q(back) + '}';
     } catch (er) { return MS_fail("글자 쓰기 실패: " + er); }
 }
+function MS_setEnd(vIdx, s, e) {
+    try {
+        var tr = MS_vtrack(vIdx); if (!tr) return MS_fail("트랙 없음");
+        var c = MS_findAt(tr, s); if (!c) return MS_fail("클립을 다시 찾지 못했어요.");
+        c.end = MS_time(e);
+        return '{"ok":true,"end":' + c.end.seconds + ',"name":' + MS_q(c.name) + '}';
+    } catch (er) { return MS_fail("길이 맞추기 실패: " + er); }
+}
 function MS_removeOne(vIdx, s) {
     try {
         var tr = MS_vtrack(vIdx); if (!tr) return MS_fail("트랙 없음");

@@ -265,47 +265,28 @@
   $("btnSync").addEventListener("click", sync);
   $("btnStop").addEventListener("click", function () { state.stop = true; E.cancel(); });
 
-  // 템플릿 글자 값(raw)에서 글자만 바꾼 새 값 만들기 — JSON으로 정확히 고치고, 앞 4바이트 길이 머리말·스타일 구간 길이도 맞춤
-  function utf8len(str) { return unescape(encodeURIComponent(str)).length; }
-  function rewriteRaw(raw, text) {
-    var pre = "", body = raw;
-    if (raw.charAt(0) !== "{" && raw.indexOf("{") === 4) { pre = raw.substring(0, 4); body = raw.substring(4); }
-    var j = JSON.parse(body);
-    var key = "textEditValue" in j ? "textEditValue" : ("mText" in j ? "mText" : null);
-    if (!key) throw new Error("템플릿 글자 칸 형식을 모르겠어요.");
-    var want = text.replace(/\n/g, "\r");
-    j[key] = want;
-    if (Array.isArray(j.fontTextRunLength) && j.fontTextRunLength.length) {      // 스타일 구간 길이 합 = 글자 수
-      var runs = j.fontTextRunLength, others = 0;
-      for (var i = 0; i < runs.length - 1; i++) others += runs[i];
-      if (others >= want.length) { j.fontTextRunLength = [want.length].concat(runs.slice(1).map(function () { return 0; })); }
-      else runs[runs.length - 1] = want.length - others;
-    }
-    var nb = JSON.stringify(j);
-    if (pre) {
-      var c = [0, 1, 2, 3].map(function (k) { return pre.charCodeAt(k) & 255; });
-      var be = ((c[0] * 256 + c[1]) * 256 + c[2]) * 256 + c[3], le = ((c[3] * 256 + c[2]) * 256 + c[1]) * 256 + c[0], v = -1, big = true;
-      if (be === body.length) v = nb.length; else if (le === body.length) { v = nb.length; big = false; }
-      else if (be === utf8len(body)) v = utf8len(nb); else if (le === utf8len(body)) { v = utf8len(nb); big = false; }
-      if (v >= 0) { var b = [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255]; if (!big) b.reverse(); pre = String.fromCharCode(b[0], b[1], b[2], b[3]); }
-    }
-    return { raw: pre + nb, key: key, want: want };
-  }
-  function readText(raw, key) {
-    try { var body = raw.indexOf("{") === 4 ? raw.substring(4) : raw; return JSON.parse(body)[key]; } catch (e) { return null; }
+  // 첫 자막을 넣은 뒤 눈으로 확인 받기 (스크립트로는 그래픽 글자를 읽을 수 없어서)
+  function askConfirm() {
+    return new Promise(function (resolve) {
+      var box = $("confirm"); box.style.display = "block";
+      function done(v) { box.style.display = "none"; $("btnOkGo").onclick = $("btnNoStop").onclick = null; resolve(v); }
+      $("btnOkGo").onclick = function () { done(true); };
+      $("btnNoStop").onclick = function () { done(false); };
+    });
   }
 
-  // 안전하게 하나씩: [올리기 1번] → [나타날 때까지 기다림] → [클립 수 확인] → [글자 1번 쓰기] → [확인]
+  // 자막 줄마다 글자가 들어간 템플릿을 만들어, 하나씩 천천히 올린다
+  //   [줄 템플릿 만들기] → [올리기 1번] → [나타날 때까지 기다림] → [클립 수 확인] → [길이 맞춤]
   function placeGraphics(tpl, vIdx, rg) {
     var items = state.result.items, from = items[0].start - 0.01, to = items[items.length - 1].end + 0.01;
-    var placed = [], k = 0, count0 = 0, total = items.length;
+    var placed = [], k = 0, count0 = 0, total = items.length, genDir = E.newGenDir();
     state.placed = { v: vIdx, starts: placed };
     state.stop = false;
     function jr(step) { E.journal({ state: "running", step: step, k: k + 1, total: total, text: items[k] ? items[k].text : "", at: Date.now(), v: vIdx, placed: placed.slice() }); }
     function fail(msg, diagText) {
       if (diagText) diag(diagText);
       E.journal(null);
-      throw new Error(msg + "\n" + placed.length + "개까지 넣고 멈췄어요. (넣은 것은 '방금 넣은 자막 지우기'로 지울 수 있어요)");
+      throw new Error(msg + "\n" + placed.length + "개까지 넣고 멈췄어요." + (placed.length ? " (넣은 것은 '방금 넣은 자막 지우기'로 지울 수 있어요)" : ""));
     }
     var pre = $("chkReplace").checked ? call("MS_removeRange(" + vIdx + "," + from + "," + to + ")") :
       call("MS_countRange(" + vIdx + "," + from + "," + to + ")").then(function (o) {
@@ -324,8 +305,12 @@
         var first = placed.length === 0;
         progress(0.85 + 0.15 * k / total);
         status("V" + (vIdx + 1) + "에 자막 넣는 중… (" + (k + 1) + "/" + total + ")" + (first ? " — 첫 자막은 템플릿을 불러오느라 조금 걸려요" : ""));
+        jr("줄 템플릿 만들기");
+        var lineTpl;
+        try { lineTpl = E.makeLineTemplate(tpl, text, genDir, k + 1); }
+        catch (e) { fail("자막 템플릿을 만들지 못했어요: " + e.message); }
         jr("올리기");
-        return call("MS_import(" + q(tpl) + "," + vIdx + "," + it.start.toFixed(5) + ")").then(function (o1) {
+        return call("MS_import(" + q(lineTpl) + "," + vIdx + "," + it.start.toFixed(5) + ")").then(function (o1) {
           if (!o1.ok) fail(o1.reason);
           jr("나타나기 기다림");
           var tries = 0, limit = first ? 60 : 24;                    // 첫 자막 최대 15초, 그 뒤 6초
@@ -337,30 +322,36 @@
             });
           }
           return wait();
-        }).then(function (p) {
-          return call("MS_count(" + vIdx + ")").then(function (c) {      // 한 번 올렸으면 클립은 정확히 하나 늘어야 함
-            if (c.ok && c.n > count0 + placed.length + 1) {
-              var extra = c.n - count0 - placed.length;
-              placed.push(it.start);
-              fail("자막 하나를 올렸는데 클립이 " + extra + "개 생겼어요. 이상 동작이라 바로 멈췄어요.");
-            }
+        }).then(function () {
+          return call("MS_count(" + vIdx + ")");
+        }).then(function (c) {                                        // 한 번 올렸으면 클립은 정확히 하나 늘어야 함
+          if (c.ok && c.n > count0 + placed.length + 1) {
+            var extra = c.n - count0 - placed.length;
             placed.push(it.start);
-            if (p.state === "notext") fail("템플릿에서 글자 칸을 찾지 못했어요.", p.diag);
-            var nr;
-            try { nr = rewriteRaw(p.raw, text); } catch (e) { fail(e.message, "글자 칸 '" + p.name + "' 값:\n" + String(p.raw).slice(0, 800)); }
-            jr("글자 쓰기");
-            return call("MS_write(" + vIdx + "," + it.start.toFixed(5) + "," + it.end.toFixed(5) + "," + p.idx + "," + q(nr.raw) + ")").then(function (w) {
-              if (!w.ok) fail(w.reason);
-              if (readText(w.back, nr.key) !== nr.want) {
-                call("MS_removeOne(" + vIdx + "," + it.start.toFixed(5) + ")");
-                placed.pop();
-                fail("템플릿에 글자가 들어가지 않았어요. 아래 내용을 Claude에게 보내 주세요.",
-                  "글자 칸: " + p.name + "\n원래 값: " + String(p.raw).slice(0, 600) + "\n쓴 값: " + nr.raw.slice(0, 600) + "\n다시 읽은 값: " + String(w.back).slice(0, 600));
+            fail("자막 하나를 올렸는데 클립이 " + extra + "개 생겼어요. 이상 동작이라 바로 멈췄어요.");
+          }
+          placed.push(it.start);
+          jr("길이 맞추기");
+          return call("MS_setEnd(" + vIdx + "," + it.start.toFixed(5) + "," + it.end.toFixed(5) + ")");
+        }).then(function (w) {
+          if (!w.ok) fail(w.reason);
+          k++;
+          if (first && load("genOK", "") !== "1") {                  // 처음 한 번은 눈으로 확인
+            E.journal(null);
+            host("MS_seek(" + (it.start + 0.05).toFixed(3) + ")");
+            status("첫 자막을 넣었어요. 프리미어 화면에서 글자가 「" + it.text.replace(/\|/g, " ") + "」로 보이는지 확인해 주세요.", "warn");
+            return askConfirm().then(function (ok) {
+              if (!ok) {
+                return call("MS_removeOne(" + vIdx + "," + it.start.toFixed(5) + ")").then(function () {
+                  placed.pop();
+                  fail("넣은 첫 자막을 지웠어요. 어떻게 보였는지(캡처) Claude에게 보내 주세요.");
+                });
               }
-              k++;
-              return sleep(first ? 400 : 80).then(next);              // 프리미어가 숨 돌릴 틈
+              save("genOK", "1");
+              return sleep(200).then(next);
             });
-          });
+          }
+          return sleep(first ? 400 : 120).then(next);               // 프리미어가 숨 돌릴 틈
         });
       }
       return next();

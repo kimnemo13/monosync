@@ -8,7 +8,7 @@
   "use strict";
   var req = (window.cep_node && window.cep_node.require) || window.require;
   if (!req) return;
-  var fs = req("fs"), path = req("path"), os = req("os"), cp = req("child_process"), crypto = req("crypto");
+  var fs = req("fs"), path = req("path"), os = req("os"), cp = req("child_process"), crypto = req("crypto"), zlib = req("zlib");
 
   var HOME = os.homedir();
   var DATA = path.join(HOME, "Library", "Application Support", "monoSync");
@@ -148,6 +148,95 @@
     cp.execFile("/usr/bin/open", [d], function () {});
   }
 
+  // ---------- 자막 줄마다 템플릿 만들기 ----------
+  // 프리미어로 만든 템플릿은 올린 뒤 스크립트로 글자를 바꿀 수 없어서(값이 이진 형식이라 첫 0바이트에서 잘림),
+  // 줄마다 글자가 이미 들어간 .mogrt를 만들어 올린다.
+  //   .mogrt(zip) = definition.json + project.prgraphic(zip ⊃ gzip된 .prproj XML) + 미리보기
+  //   글자는 .prproj 안 Source Text 값(base64 이진)의 맨 끝 문자열: [u32 길이][UTF-8][0][패딩], 맨 앞 u32 = 본문 길이(전체-12)
+  function utf8(s) { return Buffer.from(s, "utf8"); }
+  function rewriteTextBinary(buf, oldText, newText) {
+    var ob = utf8(oldText), nb = utf8(newText);
+    var i = buf.lastIndexOf(ob);
+    if (i < 16) throw new Error("템플릿 안에서 원래 글자를 찾지 못했어요.");
+    if (buf.readUInt32LE(i - 4) !== ob.length) throw new Error("템플릿 글자 구조가 예상과 달라요(길이).");
+    var after = i + ob.length;
+    if (Math.ceil((after + 1) / 4) * 4 !== buf.length || buf[after] !== 0) throw new Error("템플릿 글자 구조가 예상과 달라요(끝 위치).");
+    if (buf.readUInt32LE(0) !== buf.length - 12 || buf.readUInt32LE(8) !== 0x11223344) throw new Error("템플릿 글자 구조가 예상과 달라요(머리말).");
+    var head = Buffer.from(buf.slice(0, i - 4));
+    var len = Buffer.alloc(4); len.writeUInt32LE(nb.length, 0);
+    var end = (i + nb.length + 1), total = Math.ceil(end / 4) * 4;
+    var out = Buffer.concat([head, len, nb, Buffer.alloc(total - end + 1)]);
+    out.writeUInt32LE(out.length - 12, 0);
+    return out;
+  }
+  function xmlEsc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function uuid() { var h = crypto.randomBytes(16).toString("hex"); return h.slice(0, 8) + "-" + h.slice(8, 12) + "-4" + h.slice(13, 16) + "-a" + h.slice(17, 20) + "-" + h.slice(20, 32); }
+  var baseCache = {};
+  function loadBase(mogrt) {
+    var st = fs.statSync(mogrt), key = crypto.createHash("sha1").update(mogrt + "|" + st.size + "|" + st.mtimeMs).digest("hex").slice(0, 12);
+    if (baseCache[key]) return baseCache[key];
+    var dir = path.join(DATA, "tplbase", key);
+    if (!fs.existsSync(path.join(dir, "ok"))) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
+      mkdirp(path.join(dir, "m")); mkdirp(path.join(dir, "p"));
+      cp.execFileSync("/usr/bin/unzip", ["-o", "-q", mogrt, "-d", path.join(dir, "m")]);
+      cp.execFileSync("/usr/bin/unzip", ["-o", "-q", path.join(dir, "m", "project.prgraphic"), "-d", path.join(dir, "p")]);
+      fs.writeFileSync(path.join(dir, "ok"), "1");
+    }
+    var def = JSON.parse(fs.readFileSync(path.join(dir, "m", "definition.json"), "utf8"));
+    var ctl = (def.clientControls || []).filter(function (c) { return c.type === 6; })[0];
+    if (!ctl) throw new Error("템플릿에 글자 칸이 없어요.");
+    var oldText = ctl.value.strDB[0].str;
+    var pj = fs.readdirSync(path.join(dir, "p")).filter(function (f) { return /\.prproj$/i.test(f); })[0];
+    if (!pj) throw new Error("템플릿 안에 프로젝트가 없어요.");
+    var xml = zlib.gunzipSync(fs.readFileSync(path.join(dir, "p", pj))).toString("utf8");
+    // 원래 글자가 든 이진 값 찾기
+    var re = /<StartKeyframeValue Encoding="base64"([^>]*)>([^<]+)<\/StartKeyframeValue>/g, m, hit = null, ob = utf8(oldText);
+    while ((m = re.exec(xml)) !== null) {
+      var b = Buffer.from(m[2].trim(), "base64");
+      if (b.indexOf(ob) >= 0) { hit = { start: m.index, end: m.index + m[0].length, attrs: m[1], bin: b }; break; }
+    }
+    if (!hit) throw new Error("템플릿 안에서 글자 값을 찾지 못했어요.");
+    rewriteTextBinary(hit.bin, oldText, "확인");                  // 구조 검사(예상과 다르면 여기서 멈춤)
+    baseCache[key] = { dir: dir, def: def, oldText: oldText, pj: pj, xml: xml, hit: hit };
+    return baseCache[key];
+  }
+  // text 한 줄짜리 .mogrt 만들기 → 경로
+  function makeLineTemplate(mogrt, text, outDir, n) {
+    var B = loadBase(mogrt), t = String(text).replace(/\r\n?|\n/g, "\r");
+    var bin = rewriteTextBinary(B.hit.bin, B.oldText, t);
+    var attrs = B.hit.attrs.replace(/\s*BinaryHash="[^"]*"/, "");   // 내용이 바뀌었으니 이전 해시는 빼서 프리미어가 새로 계산하게
+    var xml = B.xml.slice(0, B.hit.start) + '<StartKeyframeValue Encoding="base64"' + attrs + ">" + bin.toString("base64") + "</StartKeyframeValue>" + B.xml.slice(B.hit.end);
+    xml = xml.split("<InstanceName>" + xmlEsc(B.oldText) + "</InstanceName>").join("<InstanceName>" + xmlEsc(t.replace(/\r/g, " ")) + "</InstanceName>");
+    var def = JSON.parse(JSON.stringify(B.def));
+    def.capsuleID = uuid();
+    var nm = "monoSync " + (n < 10 ? "0" : "") + n + " " + t.replace(/\r/g, " ").slice(0, 20);
+    def.capsuleName = nm;
+    if (def.capsuleNameLocalized && def.capsuleNameLocalized.strDB) def.capsuleNameLocalized.strDB.forEach(function (x) { x.str = nm; });
+    def.clientControls.forEach(function (c) { if (c.type === 6 && c.value && c.value.strDB) c.value.strDB.forEach(function (x) { x.str = t; }); });
+    try { def.sourceInfoLocalized.en_US.id = uuid(); } catch (e) {}
+    var work = path.join(outDir, "w" + n);
+    mkdirp(path.join(work, "p"));
+    fs.writeFileSync(path.join(work, "p", B.pj), zlib.gzipSync(Buffer.from(xml, "utf8")));
+    fs.writeFileSync(path.join(work, "definition.json"), JSON.stringify(def));
+    cp.execFileSync("/usr/bin/zip", ["-X", "-q", "-j", path.join(work, "project.prgraphic"), path.join(work, "p", B.pj)]);
+    var out = path.join(outDir, "line" + (n < 10 ? "00" : n < 100 ? "0" : "") + n + ".mogrt");
+    try { fs.unlinkSync(out); } catch (e) {}
+    cp.execFileSync("/usr/bin/zip", ["-X", "-q", "-j", out, path.join(work, "definition.json"), path.join(work, "project.prgraphic"), path.join(B.dir, "m", "thumb.png")]);
+    try { fs.rmSync(work, { recursive: true, force: true }); } catch (e) {}
+    return out;
+  }
+  function newGenDir() {
+    var root = path.join(DATA, "gen");
+    try {                                                       // 이틀 지난 것 정리
+      fs.readdirSync(root).forEach(function (d) {
+        var p = path.join(root, d);
+        try { if (Date.now() - fs.statSync(p).mtimeMs > 2 * 86400000) fs.rmSync(p, { recursive: true, force: true }); } catch (e) {}
+      });
+    } catch (e) {}
+    var d = path.join(root, String(Date.now())); mkdirp(d); return d;
+  }
+
   // ---------- 음성 트랙 전체 받아쓰기 ----------
   // clips: [{path,start,end,inPoint,outPoint,speed}] (타임라인 순)
   // 클립 소리를 0.4초 틈을 두고 이어 붙여 whisper를 한 번만 돌리고, 단어 시간을 타임라인 시간으로 되돌린다.
@@ -272,6 +361,7 @@
       try { mkdirp(DATA); if (o === null) fs.unlinkSync(path.join(DATA, "sync-journal.json")); else fs.writeFileSync(path.join(DATA, "sync-journal.json"), JSON.stringify(o)); } catch (e) {}
     },
     readJournal: function () { try { return JSON.parse(fs.readFileSync(path.join(DATA, "sync-journal.json"), "utf8")); } catch (e) { return null; } },
+    makeLineTemplate: makeLineTemplate, newGenDir: newGenDir, rewriteTextBinary: rewriteTextBinary, loadBase: loadBase,
     fileExists: function (p) { try { return fs.statSync(p).isFile(); } catch (e) { return false; } },
     listTemplates: listTemplates, templateThumb: templateThumb, openTemplateFolder: openTemplateFolder,
     tools: tools, transcribe: transcribe, transcribeTrack: transcribeTrack, wordsFromTrack: wordsFromTrack, mapTime: mapTime,
