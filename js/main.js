@@ -203,6 +203,15 @@
   Array.prototype.forEach.call(document.querySelectorAll(".preset"), function (b) {
     b.addEventListener("click", function () { if (!state.busy) sync(); });     // 누르면 바로 싱크
   });
+  function insertMode() { return load("insertMode", "cap"); }
+  function renderMode() {
+    var m = insertMode();
+    $("mCap").className = m === "cap" ? "on" : ""; $("mGfx").className = m === "gfx" ? "on" : "";
+    $("capHelp").style.display = m === "cap" ? "block" : "none"; $("replaceRow").style.display = m === "gfx" ? "flex" : "none";
+  }
+  $("mCap").addEventListener("click", function () { save("insertMode", "cap"); renderMode(); });
+  $("mGfx").addEventListener("click", function () { save("insertMode", "gfx"); renderMode(); });
+  renderMode();
   $("chkReplace").checked = load("replace", "0") === "1";
   $("chkReplace").addEventListener("change", function () { save("replace", this.checked ? "1" : "0"); });
 
@@ -253,7 +262,7 @@
       var r = state.result;
       if (opts().mode === "same" && r.overall < 0.35)
         throw new Error("음성과 자막이 거의 안 맞아요(" + Math.round(r.overall * 100) + "%). 음성 트랙(A" + (aIdx + 1) + ")과 음성 언어를 확인해 주세요. 번역 자막이면 세부 설정에서 '번역 자막'을 고르세요.");
-      return placeGraphics(tpl, vIdx, rg);
+      return insertMode() === "gfx" ? placeGraphics(tpl, vIdx, rg) : placeCaptions();
     }).then(function (msg) {
       progress(null); setBusy(false);
       if (msg) status(msg.text, msg.kind);
@@ -402,6 +411,65 @@
       return E.writeText(E.path.join(dir, nm), "﻿" + A.toSRT(state.result.items));
     });
   }
+  function placeCaptions() {
+    status("프로젝트 저장 중…");
+    return call("MS_saveProject()").then(function () { return saveSRT(); }).then(function (f) {
+      status("캡션 트랙 만드는 중…");
+      return call("MS_addCaptions(" + q(f) + ")").then(function (o) {
+        if (!o.ok) throw new Error(o.reason + "\n(SRT: " + f + ")");
+        state.placed = null;
+        var ng = state.result.items.filter(function (x) { return x.how === "guess"; }).length;
+        return { text: "새 캡션 트랙에 자막 " + state.result.items.length + "개를 넣었어요." + (ng ? " 음성에서 못 찾은 " + ng + "개는 주황색 — 추정 배치." : "") + " 트랙 스타일에서 '내레이션'을 고르면 모양이 적용돼요.", kind: ng ? "warn" : "ok" };
+      });
+    });
+  }
+
+  // 그래픽 글자 시험: 어떤 조건에서 글자가 보이는지 확인용 클립 4개
+  var testStarts = [];
+  $("btnGfxTest").addEventListener("click", function () {
+    if (state.busy) return;
+    var tpl = tplPath(), v = state.v;
+    var orig = E.templateText(tpl);
+    var same = Array.from(orig).map(function (ch, i) { return /[가-힣]/.test(ch) ? "시험같은길이글자"[i % 8] : ch; }).join("");   // 글자 수·바이트 수가 원본과 같음
+    var cases = [
+      { label: "시험1", text: "시험1 짧은 글자", keepHash: false },
+      { label: "시험2", text: "시험2 짧은 글자", keepHash: true },
+      { label: "시험3", text: same, keepHash: false },
+      { label: "시험4", text: same, keepHash: true }
+    ];
+    setBusy(true); diag("");
+    refresh().then(function () {
+      var at = Math.ceil((state.info ? state.info.end : 0) + 30), dir = E.newGenDir(), rep = ["[그래픽 글자 시험] V" + (v + 1) + ", " + fmt(at) + "부터 10초 간격"];
+      testStarts = [];
+      return cases.reduce(function (p, c, i) {
+        return p.then(function () {
+          var t = at + i * 10, f = E.makeLineTemplate(tpl, c.text, dir, 900 + i, { keepHash: c.keepHash, tag: "test" });
+          status("시험 클립 올리는 중… (" + (i + 1) + "/4)");
+          return call("MS_import(" + q(f) + "," + v + "," + t + ")").then(function () {
+            var n = 0;
+            function w() {
+              return sleep(300).then(function () { return call("MS_probe(" + v + "," + t + ")"); }).then(function (p2) {
+                if (p2.ok && p2.state !== "pending") { testStarts.push(t); rep.push(c.label + " (" + fmt(t) + ") 올라감 — 글자: " + c.text + (c.keepHash ? " · 원본 해시" : " · 해시 없음")); return; }
+                if (++n > 40) { rep.push(c.label + ": 안 올라감"); return; }
+                return w();
+              });
+            }
+            return w();
+          });
+        });
+      }, Promise.resolve()).then(function () {
+        setBusy(false);
+        host("MS_seek(" + (at + 1) + ")");
+        diag(rep.join("\n"));
+        status("시퀀스 끝 뒤(" + fmt(at) + "~)에 시험 클립을 올렸어요. 재생헤드를 각 클립 위에 두고 글자가 보이는지(무슨 글자인지) 알려 주세요.", "warn");
+      });
+    }).catch(function (e) { setBusy(false); status(e.message, "err"); });
+  });
+  $("btnGfxTestDel").addEventListener("click", function () {
+    if (!testStarts.length) { status("지울 시험 클립이 없어요.", "warn"); return; }
+    call("MS_removeAt(" + state.v + ",'" + testStarts.join(",") + "')").then(function (o) { status("시험 클립 " + (o.n || 0) + "개를 지웠어요.", "ok"); testStarts = []; });
+  });
+
   function renderResult() {
     var box = $("result"), r = state.result; box.innerHTML = "";
     $("resultWrap").style.display = r ? "block" : "none";

@@ -209,7 +209,7 @@
     var xml = B.xml;
     if (!opt.keepText) {
       var bin = rewriteTextBinary(B.hit.bin, B.oldText, t);
-      var attrs = B.hit.attrs.replace(/\s*BinaryHash="[^"]*"/, "");   // 내용이 바뀌었으니 이전 해시는 빼서 프리미어가 새로 계산하게
+      var attrs = opt.keepHash ? B.hit.attrs : B.hit.attrs.replace(/\s*BinaryHash="[^"]*"/, "");   // 내용이 바뀌었으니 이전 해시는 뺌(시험: keepHash면 그대로)
       xml = xml.slice(0, B.hit.start) + '<StartKeyframeValue Encoding="base64"' + attrs + ">" + bin.toString("base64") + "</StartKeyframeValue>" + xml.slice(B.hit.end);
       xml = xml.split("<InstanceName>" + xmlEsc(B.oldText) + "</InstanceName>").join("<InstanceName>" + xmlEsc(t.replace(/\r/g, " ")) + "</InstanceName>");
     }
@@ -227,7 +227,7 @@
     fs.writeFileSync(path.join(work, "p", B.pj), zlib.gzipSync(Buffer.from(xml, "utf8")));
     fs.writeFileSync(path.join(work, "definition.json"), JSON.stringify(def));
     cp.execFileSync("/usr/bin/zip", ["-X", "-q", "-j", path.join(work, "project.prgraphic"), path.join(work, "p", B.pj)]);
-    var out = path.join(outDir, (opt.keepText ? "same" : "line") + (n < 10 ? "00" : n < 100 ? "0" : "") + n + ".mogrt");
+    var out = path.join(outDir, (opt.keepText ? "same" : opt.tag || "line") + (n < 10 ? "00" : n < 100 ? "0" : "") + n + ".mogrt");
     try { fs.unlinkSync(out); } catch (e) {}
     var files = [];                                                  // 원본과 같은 순서·구성
     if (fs.existsSync(path.join(B.dir, "m", "thumb.mp4"))) files.push(path.join(B.dir, "m", "thumb.mp4"));
@@ -372,6 +372,7 @@
       try { mkdirp(DATA); if (o === null) fs.unlinkSync(path.join(DATA, "sync-journal.json")); else fs.writeFileSync(path.join(DATA, "sync-journal.json"), JSON.stringify(o)); } catch (e) {}
     },
     readJournal: function () { try { return JSON.parse(fs.readFileSync(path.join(DATA, "sync-journal.json"), "utf8")); } catch (e) { return null; } },
+    templateText: function (mogrt) { return loadBase(mogrt).oldText; },
     makeLineTemplate: makeLineTemplate, newGenDir: newGenDir, rewriteTextBinary: rewriteTextBinary, loadBase: loadBase,
     fileExists: function (p) { try { return fs.statSync(p).isFile(); } catch (e) { return false; } },
     listTemplates: listTemplates, templateThumb: templateThumb, openTemplateFolder: openTemplateFolder,
