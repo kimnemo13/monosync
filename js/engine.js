@@ -202,27 +202,38 @@
     return baseCache[key];
   }
   // text 한 줄짜리 .mogrt 만들기 → 경로
-  function makeLineTemplate(mogrt, text, outDir, n) {
-    var B = loadBase(mogrt), t = String(text).replace(/\r\n?|\n/g, "\r");
-    var bin = rewriteTextBinary(B.hit.bin, B.oldText, t);
-    var attrs = B.hit.attrs.replace(/\s*BinaryHash="[^"]*"/, "");   // 내용이 바뀌었으니 이전 해시는 빼서 프리미어가 새로 계산하게
-    var xml = B.xml.slice(0, B.hit.start) + '<StartKeyframeValue Encoding="base64"' + attrs + ">" + bin.toString("base64") + "</StartKeyframeValue>" + B.xml.slice(B.hit.end);
-    xml = xml.split("<InstanceName>" + xmlEsc(B.oldText) + "</InstanceName>").join("<InstanceName>" + xmlEsc(t.replace(/\r/g, " ")) + "</InstanceName>");
+  //   opt.keepText: 글자는 그대로 두고 ID만 바꿈(진단용) / 바꾸는 것: 글자 값, 레이어 이름, 정의의 글자, capsuleID, 시퀀스 ID(정의·프로젝트 양쪽 똑같이)
+  function makeLineTemplate(mogrt, text, outDir, n, opt) {
+    opt = opt || {};
+    var B = loadBase(mogrt), t = opt.keepText ? B.oldText : String(text).replace(/\r\n?|\n/g, "\r");
+    var xml = B.xml;
+    if (!opt.keepText) {
+      var bin = rewriteTextBinary(B.hit.bin, B.oldText, t);
+      var attrs = B.hit.attrs.replace(/\s*BinaryHash="[^"]*"/, "");   // 내용이 바뀌었으니 이전 해시는 빼서 프리미어가 새로 계산하게
+      xml = xml.slice(0, B.hit.start) + '<StartKeyframeValue Encoding="base64"' + attrs + ">" + bin.toString("base64") + "</StartKeyframeValue>" + xml.slice(B.hit.end);
+      xml = xml.split("<InstanceName>" + xmlEsc(B.oldText) + "</InstanceName>").join("<InstanceName>" + xmlEsc(t.replace(/\r/g, " ")) + "</InstanceName>");
+    }
     var def = JSON.parse(JSON.stringify(B.def));
     def.capsuleID = uuid();
-    var nm = "monoSync " + (n < 10 ? "0" : "") + n + " " + t.replace(/\r/g, " ").slice(0, 20);
-    def.capsuleName = nm;
-    if (def.capsuleNameLocalized && def.capsuleNameLocalized.strDB) def.capsuleNameLocalized.strDB.forEach(function (x) { x.str = nm; });
+    var seqId = null; try { seqId = def.sourceInfoLocalized.en_US.id; } catch (e) {}
+    if (seqId && xml.indexOf(seqId) >= 0) {                        // 템플릿 안 시퀀스 ID — 양쪽을 똑같이 바꿔야 연결이 유지됨
+      var nid = uuid();
+      xml = xml.split(seqId).join(nid);
+      Object.keys(def.sourceInfoLocalized).forEach(function (lc) { if (def.sourceInfoLocalized[lc].id === seqId) def.sourceInfoLocalized[lc].id = nid; });
+    }
     def.clientControls.forEach(function (c) { if (c.type === 6 && c.value && c.value.strDB) c.value.strDB.forEach(function (x) { x.str = t; }); });
-    try { def.sourceInfoLocalized.en_US.id = uuid(); } catch (e) {}
     var work = path.join(outDir, "w" + n);
     mkdirp(path.join(work, "p"));
     fs.writeFileSync(path.join(work, "p", B.pj), zlib.gzipSync(Buffer.from(xml, "utf8")));
     fs.writeFileSync(path.join(work, "definition.json"), JSON.stringify(def));
     cp.execFileSync("/usr/bin/zip", ["-X", "-q", "-j", path.join(work, "project.prgraphic"), path.join(work, "p", B.pj)]);
-    var out = path.join(outDir, "line" + (n < 10 ? "00" : n < 100 ? "0" : "") + n + ".mogrt");
+    var out = path.join(outDir, (opt.keepText ? "same" : "line") + (n < 10 ? "00" : n < 100 ? "0" : "") + n + ".mogrt");
     try { fs.unlinkSync(out); } catch (e) {}
-    cp.execFileSync("/usr/bin/zip", ["-X", "-q", "-j", out, path.join(work, "definition.json"), path.join(work, "project.prgraphic"), path.join(B.dir, "m", "thumb.png")]);
+    var files = [];                                                  // 원본과 같은 순서·구성
+    if (fs.existsSync(path.join(B.dir, "m", "thumb.mp4"))) files.push(path.join(B.dir, "m", "thumb.mp4"));
+    files.push(path.join(work, "project.prgraphic"), path.join(work, "definition.json"));
+    if (fs.existsSync(path.join(B.dir, "m", "thumb.png"))) files.push(path.join(B.dir, "m", "thumb.png"));
+    cp.execFileSync("/usr/bin/zip", ["-X", "-q", "-j", out].concat(files));
     try { fs.rmSync(work, { recursive: true, force: true }); } catch (e) {}
     return out;
   }

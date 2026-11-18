@@ -275,6 +275,32 @@
     });
   }
 
+  // 첫 자막이 안 나타날 때 자동 점검: (A) 원본 템플릿 (B) ID만 바꾼 템플릿 을 빈 자리에 올려 보고 지움
+  function selfTest(tpl, vIdx, genDir) {
+    var at = Math.ceil((state.info ? state.info.end : 0) + 30), lines = ["[monoSync 자동 점검] V" + (vIdx + 1) + ", 시퀀스 끝+30초(" + at + "초)에 시험"];
+    function one(label, file, t) {
+      return call("MS_import(" + q(file) + "," + vIdx + "," + t + ")").then(function (o) {
+        if (!o.ok) { lines.push(label + ": 올리기 오류 — " + o.reason); return; }
+        var n = 0;
+        function w() {
+          return sleep(300).then(function () { return call("MS_probe(" + vIdx + "," + t + ")"); }).then(function (p) {
+            if (p.ok && p.state !== "pending") { lines.push(label + ": 나타남 ✓"); return call("MS_removeOne(" + vIdx + "," + t + ")"); }
+            if (++n > 40) { lines.push(label + ": 안 나타남 ✗"); return; }
+            return w();
+          });
+        }
+        return w();
+      });
+    }
+    status("첫 자막이 안 나타나서 자동 점검 중… (최대 30초)", "warn");
+    var same;
+    try { same = E.makeLineTemplate(tpl, "", genDir, 999, { keepText: true }); } catch (e) { lines.push("ID만 바꾼 템플릿 만들기 실패: " + e.message); }
+    return one("A 원본 템플릿", tpl, at)
+      .then(function () { return same ? one("B ID만 바꾼 템플릿", same, at + 10) : null; })
+      .then(function () { lines.push("C 글자 바꾼 템플릿(이번 자막): 안 나타남 ✗"); return lines.join("\n"); })
+      .catch(function (e) { lines.push("점검 중 오류: " + e.message); return lines.join("\n"); });
+  }
+
   // 자막 줄마다 글자가 들어간 템플릿을 만들어, 하나씩 천천히 올린다
   //   [줄 템플릿 만들기] → [올리기 1번] → [나타날 때까지 기다림] → [클립 수 확인] → [길이 맞춤]
   function placeGraphics(tpl, vIdx, rg) {
@@ -317,7 +343,13 @@
           function wait() {
             return sleep(250).then(function () { return call("MS_probe(" + vIdx + "," + it.start.toFixed(5) + ")"); }).then(function (p) {
               if (!p.ok) fail(p.reason);
-              if (p.state === "pending") { if (++tries > limit) fail((k + 1) + "번째 자막 클립이 타임라인에 나타나지 않았어요."); return wait(); }
+              if (p.state === "pending") {
+                if (++tries > limit) {
+                  if (first) return selfTest(tpl, vIdx, genDir).then(function (rep) { fail("1번째 자막 클립이 타임라인에 나타나지 않았어요. 자동 점검 결과를 Claude에게 보내 주세요.", rep); });
+                  fail((k + 1) + "번째 자막 클립이 타임라인에 나타나지 않았어요.");
+                }
+                return wait();
+              }
               return p;
             });
           }

@@ -35,6 +35,7 @@
       if (!s) continue;
       if (/^\d+$/.test(s)) continue;                                   // SRT 번호
       if (/-->/.test(s) && /\d\d:\d\d/.test(s)) continue;             // SRT 시간
+      if (!normChars(s).length) continue;                              // 글자·숫자가 없는 줄(보이지 않는 문자만 있는 줄 등)
       out.push(cleanLine(s));
     }
     return out;
