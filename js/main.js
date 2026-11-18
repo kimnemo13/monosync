@@ -256,7 +256,8 @@
       return E.transcribeTrack(clips, $("lang").value, $("model").value, function (p, m) { progress(p * 0.85); status(m); });
     }).then(function (res) {
       state.words = E.wordsFromTrack(res).filter(function (w) { return w.t1 > rg.from && w.t0 < rg.to; });
-      state.result = A.run(state.words, L, opts());
+      var o2 = opts(); o2.regions = clips.map(function (c) { return { t0: Math.max(c.start, rg.from), t1: Math.min(c.end, rg.to) }; });
+      state.result = A.run(state.words, L, o2);
       snapItems(state.result.items);
       renderResult();
       var r = state.result;

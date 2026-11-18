@@ -119,21 +119,44 @@
     return { items: items, overall: totStrong / n };
   }
 
-  // 못 맞춘 줄: 앞뒤로 맞춘 줄 사이 시간을 글자 수 비율로 나눔
+  // 못 맞춘 줄: 앞뒤로 맞춘 줄 사이에서, 음성이 있는 구간(음성 클립)만 이어 붙인 시간 위에 글자 수 비율로 나눔
+  var REGIONS = null;   // run()이 opt.regions로 넣어 줌: [{t0,t1}] 시간순, 겹침 없음
+  function regionsIn(from, to) {
+    var out = [];
+    (REGIONS || []).forEach(function (r) { var a = Math.max(r.t0, from), b = Math.min(r.t1, to); if (b - a > 0.05) out.push({ t0: a, t1: b }); });
+    return out;
+  }
   function fillGuesses(items, words) {
-    var T0 = words.length ? words[0].t0 : 0, T1 = words.length ? words[words.length - 1].t1 : 1;
+    var T0 = REGIONS && REGIONS.length ? REGIONS[0].t0 : (words.length ? words[0].t0 : 0);
+    var T1 = REGIONS && REGIONS.length ? REGIONS[REGIONS.length - 1].t1 : (words.length ? words[words.length - 1].t1 : 1);
     var k = 0;
     while (k < items.length) {
       if (items[k].how === "match") { k++; continue; }
       var a = k; while (k < items.length && items[k].how !== "match") k++;
       var from = a > 0 ? items[a - 1].end : T0, to = k < items.length ? items[k].start : T1;
-      if (!(to > from)) to = from + 1.5 * (k - a);
-      var wsum = 0, x;
-      for (x = a; x < k; x++) wsum += Math.max(2, normChars(items[x].text).length);
-      var t = from;
+      var segs = regionsIn(from, to);
+      if (!segs.length) {                                   // 사이에 음성 구간이 없음 → 앞 자막 끝/뒤 자막 시작 근처 음성 구간에 붙임
+        var near = (REGIONS || []).filter(function (r) { return r.t1 > from - 0.01; })[0];
+        segs = near ? [{ t0: Math.max(near.t0, from), t1: near.t1 }] : [{ t0: from, t1: Math.max(to, from + 1.5 * (k - a)) }];
+      }
+      var total = segs.reduce(function (x, r) { return x + (r.t1 - r.t0); }, 0);
+      var wts = [], wsum = 0, x;
+      for (x = a; x < k; x++) { var w = Math.max(2, normChars(items[x].text).length); wts.push(w); wsum += w; }
+      // 말한 시간 좌표 s → 실제 시간 (구간 사이 틈은 건너뜀)
+      var toReal = function (sp, preferStart) {
+        var acc = 0;
+        for (var i = 0; i < segs.length; i++) {
+          var len = segs[i].t1 - segs[i].t0;
+          if (sp < acc + len - 1e-9 || (!preferStart && sp <= acc + len + 1e-9) || i === segs.length - 1) return segs[i].t0 + Math.min(len, Math.max(0, sp - acc));
+          acc += len;
+        }
+        return segs[segs.length - 1].t1;
+      };
+      var cum = 0;
       for (x = a; x < k; x++) {
-        var d = (to - from) * Math.max(2, normChars(items[x].text).length) / wsum;
-        items[x].start = t; items[x].end = t + d; t += d;
+        var d = total * wts[x - a] / wsum;
+        items[x].start = toReal(cum, true); items[x].end = toReal(cum + d, false); cum += d;
+        if (items[x].end <= items[x].start) items[x].end = items[x].start + 0.3;
       }
     }
   }
@@ -215,12 +238,47 @@
     return items;
   }
 
+  function mergeRegions(rs) {
+    if (!rs || !rs.length) return null;
+    var a = rs.map(function (r) { return { t0: r.t0, t1: r.t1 }; }).sort(function (x, y) { return x.t0 - y.t0; }), out = [a[0]];
+    for (var i = 1; i < a.length; i++) { var l = out[out.length - 1]; if (a[i].t0 <= l.t1 + 0.02) l.t1 = Math.max(l.t1, a[i].t1); else out.push(a[i]); }
+    return out;
+  }
+  // 자막을 음성 구간(음성 클립) 안에만 두기: 가장 많이 겹치는 구간으로, 없으면 가장 가까운 구간으로
+  function clampToRegions(items, opt) {
+    if (!REGIONS || !REGIONS.length) return items;
+    var pad = opt.padEnd != null ? opt.padEnd : 0.15;
+    items.forEach(function (it) {
+      var best = null, bo = 0, bd = Infinity;
+      REGIONS.forEach(function (r) {
+        var ov = Math.min(r.t1, it.end) - Math.max(r.t0, it.start);
+        if (ov > bo) { bo = ov; best = r; }
+        var dist = it.end < r.t0 ? r.t0 - it.end : it.start > r.t1 ? it.start - r.t1 : 0;
+        if (bo <= 0 && dist < bd) { bd = dist; if (!best || bo <= 0) best = r; }
+      });
+      if (!best) return;
+      var dur = it.end - it.start;
+      if (bo <= 0) {                                      // 음성 없는 곳에 있었음 → 그 구간 안으로 옮김
+        if (it.end <= best.t0) { it.start = best.t0; it.end = best.t0 + Math.min(dur, best.t1 - best.t0); }
+        else { it.end = best.t1; it.start = Math.max(best.t0, best.t1 - dur); }
+        it.moved = true;
+      } else {
+        if (it.start < best.t0) it.start = best.t0;
+        if (it.end > best.t1 + pad) it.end = best.t1 + pad;
+      }
+    });
+    items.sort(function (a, b) { return a.start - b.start || a.i - b.i; });
+    for (var k = 0; k < items.length - 1; k++) if (items[k].end > items[k + 1].start) items[k].end = Math.max(items[k].start + 0.1, items[k + 1].start);
+    return items;
+  }
+
   function run(words, lines, opt) {
     opt = opt || {};
+    REGIONS = mergeRegions(opt.regions);
     words = (words || []).filter(function (w) { return w && isFinite(w.t0) && isFinite(w.t1); })
       .sort(function (a, b) { return a.t0 - b.t0; });
     var res = opt.mode === "translate" ? alignTranslate(words, lines) : alignSame(words, lines);
-    res.items = polish(res.items, opt);
+    res.items = clampToRegions(polish(res.items, opt), opt);
     res.recognized = words.map(function (w) { return w.text; }).join("").replace(/\s+/g, " ").trim();
     return res;
   }
