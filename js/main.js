@@ -257,6 +257,7 @@
     }).then(function (res) {
       state.words = E.wordsFromTrack(res).filter(function (w) { return w.t1 > rg.from && w.t0 < rg.to; });
       var o2 = opts(); o2.regions = clips.map(function (c) { return { t0: Math.max(c.start, rg.from), t1: Math.min(c.end, rg.to) }; });
+      o2.voiced = res.vad || null;                                   // 실제 말소리 구간(음성 에너지)
       state.result = A.run(state.words, L, o2);
       snapItems(state.result.items);
       renderResult();

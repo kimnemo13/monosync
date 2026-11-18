@@ -123,7 +123,7 @@
   var REGIONS = null;   // run()이 opt.regions로 넣어 줌: [{t0,t1}] 시간순, 겹침 없음
   function regionsIn(from, to) {
     var out = [];
-    (REGIONS || []).forEach(function (r) { var a = Math.max(r.t0, from), b = Math.min(r.t1, to); if (b - a > 0.05) out.push({ t0: a, t1: b }); });
+    ((VOICED && VOICED.length ? VOICED : REGIONS) || []).forEach(function (r) { var a = Math.max(r.t0, from), b = Math.min(r.t1, to); if (b - a > 0.05) out.push({ t0: a, t1: b }); });
     return out;
   }
   function fillGuesses(items, words) {
@@ -272,13 +272,39 @@
     return items;
   }
 
+  // 자막 시작을 실제 말소리 시작에, 끝을 실제 말소리 끝에 붙임 (VOICED: 음성 에너지로 찾은 말소리 구간)
+  var VOICED = null;
+  function snapToVoice(items) {
+    if (!VOICED || !VOICED.length) return items;
+    var V = VOICED;
+    function inside(t) { for (var i = 0; i < V.length; i++) if (V[i].t0 <= t && t < V[i].t1) return V[i]; return null; }
+    items.forEach(function (it) {
+      var s = it.start, e = it.end, v = inside(s), i;
+      if (v) { if (s - v.t0 <= 0.5) s = v.t0; }                       // 말하는 중에 시작 → 0.5초 안에 말이 시작됐으면 그 시작점으로
+      else {                                                         // 조용한 곳에서 시작 → 다음 말소리 시작으로
+        var moved = false;
+        for (i = 0; i < V.length; i++) if (V[i].t0 >= s && V[i].t0 < e) { s = V[i].t0; moved = true; break; }
+        if (!moved) for (i = V.length - 1; i >= 0; i--) if (V[i].t1 > s - 0.4 && V[i].t0 < s) { s = Math.max(V[i].t0, s - 0.4); break; }
+      }
+      var w = inside(e - 0.001);
+      if (w) { if (w.t1 - e <= 0.5) e = w.t1; }                       // 말하는 중에 끝 → 0.5초 안에 말이 끝나면 거기까지
+      else { for (i = V.length - 1; i >= 0; i--) if (V[i].t1 <= e && V[i].t1 > s) { e = V[i].t1; break; } }   // 조용한 곳에서 끝 → 직전 말소리 끝
+      if (e - s < 0.2) e = s + 0.2;
+      it.start = s; it.end = e;
+    });
+    items.sort(function (a, b) { return a.start - b.start || a.i - b.i; });
+    for (var k = 0; k < items.length - 1; k++) if (items[k].end > items[k + 1].start) items[k].end = Math.max(items[k].start + 0.1, items[k + 1].start);
+    return items;
+  }
+
   function run(words, lines, opt) {
     opt = opt || {};
     REGIONS = mergeRegions(opt.regions);
+    VOICED = mergeRegions(opt.voiced);
     words = (words || []).filter(function (w) { return w && isFinite(w.t0) && isFinite(w.t1); })
       .sort(function (a, b) { return a.t0 - b.t0; });
     var res = opt.mode === "translate" ? alignTranslate(words, lines) : alignSame(words, lines);
-    res.items = clampToRegions(polish(res.items, opt), opt);
+    res.items = clampToRegions(polish(snapToVoice(res.items), opt), opt);
     res.recognized = words.map(function (w) { return w.text; }).join("").replace(/\s+/g, " ").trim();
     return res;
   }

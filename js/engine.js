@@ -230,7 +230,7 @@
     var out = path.join(outDir, (opt.keepText ? "same" : opt.tag || "line") + (n < 10 ? "00" : n < 100 ? "0" : "") + n + ".mogrt");
     try { fs.unlinkSync(out); } catch (e) {}
     var files = [];                                                  // 원본과 같은 순서·구성
-    if (fs.existsSync(path.join(B.dir, "m", "thumb.mp4"))) files.push(path.join(B.dir, "m", "thumb.mp4"));
+    // 미리보기 영상(thumb.mp4)은 에센셜 그래픽 목록용이라 타임라인에 올릴 땐 필요 없음 → 빼서 파일을 가볍게
     files.push(path.join(work, "project.prgraphic"), path.join(work, "definition.json"));
     if (fs.existsSync(path.join(B.dir, "m", "thumb.png"))) files.push(path.join(B.dir, "m", "thumb.png"));
     cp.execFileSync("/usr/bin/zip", ["-X", "-q", "-j", out].concat(files));
@@ -275,6 +275,30 @@
     h.writeUInt32LE(SR * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(bytes, 40);
     return h;
   }
+  // 16kHz 모노 PCM → 실제 말소리 구간 [{t0,t1}] (클립 안 시간, 초). 20ms 단위 음량으로 판단
+  function voicedSegments(buf) {
+    var FR = SR / 50, n = Math.floor(buf.length / 2 / FR), db = new Float32Array(n), i, k;
+    for (i = 0; i < n; i++) {
+      var sum = 0;
+      for (k = 0; k < FR; k++) { var v = buf.readInt16LE((i * FR + k) * 2) / 32768; sum += v * v; }
+      db[i] = 10 * Math.log10(sum / FR + 1e-10);
+    }
+    if (!n) return [];
+    var sorted = Array.from(db).sort(function (a, b) { return a - b; });
+    var floor = sorted[Math.floor(n * 0.15)], peak = sorted[Math.floor(n * 0.97)];
+    if (peak - floor < 10) return [{ t0: 0, t1: n / 50 }];          // 대비가 거의 없음(음악 깔림 등) → 전체를 말소리로
+    var thr = floor + Math.max(8, (peak - floor) * 0.3);
+    var segs = [], on = -1;
+    for (i = 0; i <= n; i++) {
+      var voiced = i < n && db[i] > thr;
+      if (voiced && on < 0) on = i;
+      if (!voiced && on >= 0) { segs.push([on, i]); on = -1; }
+    }
+    var merged = [];                                                // 0.15초보다 짧은 끊김은 이어 붙이고, 0.08초보다 짧은 소리는 버림
+    segs.forEach(function (g) { var l = merged[merged.length - 1]; if (l && g[0] - l[1] < 8) l[1] = g[1]; else merged.push(g); });
+    return merged.filter(function (g) { return g[1] - g[0] >= 4; }).map(function (g) { return { t0: g[0] / 50, t1: g[1] / 50 }; });
+  }
+
   function transcribeTrack(clips, lang, preferModel, onProgress) {
     var t = tools(preferModel);
     if (!t.ffmpeg) return Promise.reject(new Error("ffmpeg가 없어요. install-mac.command를 다시 실행해 주세요."));
@@ -288,16 +312,17 @@
       var st = fs.statSync(c.path);
       return [c.path, st.size, st.mtimeMs, c.start.toFixed(3), c.end.toFixed(3), c.inPoint.toFixed(3), (c.speed || 1).toFixed(3)].join(",");
     }).join(";");
-    var key = crypto.createHash("sha1").update([sig, lang, path.basename(t.model), "track-v1"].join("|")).digest("hex").slice(0, 20);
+    var key = crypto.createHash("sha1").update([sig, lang, path.basename(t.model), "track-v2"].join("|")).digest("hex").slice(0, 20);
     mkdirp(CACHE);
     var base = path.join(CACHE, key), jsonPath = base + ".json", mapPath = base + ".map.json", wav = base + ".wav";
     if (fs.existsSync(jsonPath) && fs.existsSync(mapPath)) {
       try {
         onProgress(1, "저장해 둔 인식 결과 사용");
-        return Promise.resolve({ json: JSON.parse(fs.readFileSync(jsonPath, "utf8")), map: JSON.parse(fs.readFileSync(mapPath, "utf8")) });
+        var mp = JSON.parse(fs.readFileSync(mapPath, "utf8"));
+        return Promise.resolve({ json: JSON.parse(fs.readFileSync(jsonPath, "utf8")), map: mp.map || mp, vad: mp.vad || null });
       } catch (e) {}
     }
-    var parts = [], map = [], pos = 0, n = clips.length;
+    var parts = [], map = [], pos = 0, n = clips.length, vad = [];
     var chain = Promise.resolve();
     clips.forEach(function (c, k) {
       chain = chain.then(function () {
@@ -308,6 +333,7 @@
           var buf = fs.readFileSync(pcm); try { fs.unlinkSync(pcm); } catch (e) {}
           var sec = buf.length / 2 / SR;
           map.push({ pos: pos, len: sec, start: c.start });
+          voicedSegments(buf).forEach(function (g) { vad.push({ t0: c.start + g.t0, t1: Math.min(c.end, c.start + g.t1) }); });   // atempo 적용 후라 클립 안 시간 = 타임라인 경과
           parts.push(buf); pos += sec;
           var gap = Buffer.alloc(Math.round(GAP * SR) * 2);         // 클립 사이 무음
           parts.push(gap); pos += GAP;
@@ -328,8 +354,8 @@
       });
     }).then(function () {
       try { fs.unlinkSync(wav); } catch (e) {}
-      fs.writeFileSync(mapPath, JSON.stringify(map));
-      return { json: JSON.parse(fs.readFileSync(jsonPath, "utf8")), map: map };
+      fs.writeFileSync(mapPath, JSON.stringify({ map: map, vad: vad }));
+      return { json: JSON.parse(fs.readFileSync(jsonPath, "utf8")), map: map, vad: vad };
     }, function (e) { try { fs.unlinkSync(wav); } catch (e2) {} throw e; });
   }
   // 이어 붙인 오디오 위치(초) → 타임라인 초
@@ -373,6 +399,7 @@
     },
     readJournal: function () { try { return JSON.parse(fs.readFileSync(path.join(DATA, "sync-journal.json"), "utf8")); } catch (e) { return null; } },
     templateText: function (mogrt) { return loadBase(mogrt).oldText; },
+    voicedSegments: voicedSegments,
     makeLineTemplate: makeLineTemplate, newGenDir: newGenDir, rewriteTextBinary: rewriteTextBinary, loadBase: loadBase,
     fileExists: function (p) { try { return fs.statSync(p).isFile(); } catch (e) { return false; } },
     listTemplates: listTemplates, templateThumb: templateThumb, openTemplateFolder: openTemplateFolder,
