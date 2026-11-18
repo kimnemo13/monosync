@@ -46,6 +46,13 @@
   .seg button:first-child { border-radius: 3px 0 0 3px; } .seg button:last-child { border-radius: 0 3px 3px 0; }
   .seg button.on { background: #0f3a5f; color: #dceafb; border-color: #0b2a45; }
   #trackInfo { margin-top: 7px; }
+  .presets { display: flex; gap: 6px; margin-top: 8px; }
+  .preset { flex: 1; display: flex; flex-direction: column; align-items: stretch; padding: 0; overflow: hidden; border: 2px solid #3a2342; background: #1b1b1b; border-radius: 5px; }
+  .preset:hover:not(:disabled) { border-color: #b24fd0; background: #221a25; }
+  .preset.on { border-color: #b24fd0; }
+  .preset .pimg { height: 46px; background: #000 center/contain no-repeat; }
+  .preset .pname { padding: 6px 8px 0; font-size: 13px; font-weight: 700; color: #f0d6f8; text-align: left; }
+  .preset .pgo { padding: 2px 8px 7px; font-size: 10.5px; color: #9a8aa0; text-align: left; }
   .tplbar { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
   #tplGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; margin-top: 6px; max-height: 250px; overflow-y: auto; }
   .tcard { background: #1b1b1b; border: 2px solid #1b1b1b; border-radius: 4px; cursor: pointer; overflow: hidden; }
@@ -119,8 +126,16 @@
     <h3>3 · 자막 모양</h3>
     <div class="seg"><button id="sGfx" class="on">그래픽 클립 (내 템플릿)</button><button id="sCap">캡션 트랙</button></div>
     <div id="gfxBox">
+      <div class="presets" id="presets">
+        <button class="preset" data-id="narration" title="이 모양으로 바로 싱크">
+          <span class="pimg" style="background-image:url('./templates/narration.png')"></span>
+          <span class="pname">내레이션 자막</span>
+          <span class="pgo">누르면 바로 싱크 ▶</span>
+        </button>
+      </div>
       <div class="tplbar">
-        <span class="muted grow" id="tplHint">템플릿을 고르세요</span>
+        <span class="muted" style="font-weight:600;color:#b8b8b8">내 템플릿</span>
+        <span class="muted grow" id="tplHint"></span>
         <button id="btnTplRefresh" class="link">↻</button>
       </div>
       <div id="tplGrid"></div>

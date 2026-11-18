@@ -268,6 +268,7 @@
   function readText(file) { return fs.readFileSync(file, "utf8"); }
 
   window.MSEngine = {
+    fileExists: function (p) { try { return fs.statSync(p).isFile(); } catch (e) { return false; } },
     listTemplates: listTemplates, templateThumb: templateThumb, openTemplateFolder: openTemplateFolder,
     tools: tools, transcribe: transcribe, transcribeTrack: transcribeTrack, wordsFromTrack: wordsFromTrack, mapTime: mapTime,
     cancel: function () { transcribeTrack.cancelled = true; cancel(); }, resetCancel: function () { transcribeTrack.cancelled = false; }, clearCache: clearCache,

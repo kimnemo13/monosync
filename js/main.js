@@ -54,7 +54,8 @@
   function fmt(t) { var m = Math.floor(t / 60), s = t - m * 60; return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1); }
   function setBusy(b) {
     state.busy = b;
-    $("btnSync").disabled = b; $("btnSync").textContent = b ? "싱크 중…" : "싱크";
+    $("btnSync").disabled = b; markPresets();
+    Array.prototype.forEach.call(document.querySelectorAll(".preset"), function (x) { x.disabled = b; });
     $("stopRow").style.display = b ? "flex" : "none";
     ["btnUndo", "btnSrt", "btnRefresh"].forEach(function (id) { $(id).disabled = b; });
   }
@@ -193,6 +194,27 @@
   window.addEventListener("focus", function () { if (!state.busy) refresh(); });
 
   // ---------- 3) 스타일 ----------
+  // 내장 템플릿: "builtin:narration" → 확장 폴더/templates/narration.mogrt
+  var BUILTIN = { narration: { file: "templates/narration.mogrt", name: "내레이션 자막" } };
+  function extRoot() {
+    try { return decodeURIComponent(window.__adobe_cep__.getSystemPath("extension")).replace(/^file:\/\//, ""); } catch (e) { return ""; }
+  }
+  function tplPath(v) { var m = /^builtin:(\w+)$/.exec(v || ""); return m && BUILTIN[m[1]] ? E.path.join(extRoot(), BUILTIN[m[1]].file) : v; }
+  function tplName(v) { var m = /^builtin:(\w+)$/.exec(v || ""); return m && BUILTIN[m[1]] ? BUILTIN[m[1]].name : (v ? E.path.basename(v).replace(/\.mogrt$/i, "") : ""); }
+  function markPresets() {
+    var cur = load("tpl", "");
+    Array.prototype.forEach.call(document.querySelectorAll(".preset"), function (b) { b.classList.toggle("on", cur === "builtin:" + b.getAttribute("data-id")); });
+    $("btnSync").textContent = state.busy ? "싱크 중…" : (state.style === "gfx" && cur ? "싱크 · " + tplName(cur) : "싱크");
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".preset"), function (b) {
+    b.addEventListener("click", function () {
+      if (state.busy) return;
+      save("tpl", "builtin:" + b.getAttribute("data-id"));
+      state.style = "gfx"; save("style", "gfx");
+      renderStyle(); scanTemplates(true);
+      sync();                                               // 누르면 바로 싱크
+    });
+  });
   // 템플릿 목록: 프리미어 로컬 템플릿 폴더를 자동으로 훑어, 새로 내보낸 템플릿은 바로 골라 줌
   var tplKnown = null, thumbCache = {};
   function renderStyle() {
@@ -213,13 +235,15 @@
       save("tpl", fresh[0].path); cur = fresh[0].path;
       status("새 템플릿 「" + fresh[0].name + "」을 골랐어요.", "ok");
       $("help").style.display = "none";
-    } else if ((!cur || !tplKnown[cur]) && list.length && first) { save("tpl", list[0].path); cur = list[0].path; }
+    } else if (!cur && first) { save("tpl", "builtin:narration"); cur = "builtin:narration"; }
+    else if (cur && !/^builtin:/.test(cur) && !tplKnown[cur] && first) { save("tpl", "builtin:narration"); cur = "builtin:narration"; }
+    markPresets();
     if (!fresh.length && !announce && renderStyle.lastPaths === paths && renderStyle.lastCur === cur) return;
     renderStyle.lastPaths = paths; renderStyle.lastCur = cur;
     var g = $("tplGrid"); g.innerHTML = "";
     if (!list.length) {
-      g.innerHTML = '<div class="tempty">아직 템플릿이 없어요.<br>V2의 자막 클립을 <b>우클릭 › 모션 그래픽 템플릿으로 내보내기</b> → 확인<br>하면 여기에 바로 나타나요.</div>';
-      $("tplHint").textContent = "템플릿 없음";
+      g.innerHTML = '<div class="tempty">다른 모양이 필요하면 자막 클립을 <b>우클릭 › 모션 그래픽 템플릿으로 내보내기</b> → 확인. 여기에 바로 나타나요.</div>';
+      $("tplHint").textContent = "";
       return;
     }
     list.forEach(function (t) {
@@ -233,14 +257,13 @@
       function show(img) { if (img) { th.style.backgroundImage = 'url("file://' + encodeURI(img) + '")'; th.textContent = ""; } }
       if (thumbCache[t.path] !== undefined) show(thumbCache[t.path]);
       else E.templateThumb(t.path, function (img) { thumbCache[t.path] = img; show(img); });
-      c.addEventListener("click", function () { save("tpl", t.path); scanTemplates(true); status("자막 모양: " + t.name); });
+      c.addEventListener("click", function () { save("tpl", t.path); scanTemplates(true); status("자막 모양: " + t.name + " — 아래 싱크를 누르세요."); });
       g.appendChild(c);
     });
-    var sel = list.filter(function (t) { return t.path === cur; })[0];
-    $("tplHint").textContent = sel ? "선택: " + sel.name : "템플릿을 눌러 고르세요";
+    $("tplHint").textContent = "";
   }
-  $("sGfx").addEventListener("click", function () { state.style = "gfx"; save("style", "gfx"); renderStyle(); });
-  $("sCap").addEventListener("click", function () { state.style = "cap"; save("style", "cap"); renderStyle(); });
+  $("sGfx").addEventListener("click", function () { state.style = "gfx"; save("style", "gfx"); renderStyle(); markPresets(); });
+  $("sCap").addEventListener("click", function () { state.style = "cap"; save("style", "cap"); renderStyle(); markPresets(); });
   $("btnTpl").addEventListener("click", function () {
     call("MS_pickMogrt()").then(function (o) { if (o.ok) { save("tpl", o.path); scanTemplates(true); status("자막 모양: " + E.path.basename(o.path)); } });
   });
@@ -277,7 +300,8 @@
     if (!checkTools()) { status("설치가 덜 됐어요.", "err"); return; }
     var L = lines();
     if (!L.length) { status("자막 텍스트를 먼저 넣어 주세요.", "err"); return; }
-    var tpl = load("tpl", "");
+    var tpl = tplPath(load("tpl", ""));
+    if (state.style === "gfx" && tpl && !E.fileExists(tpl)) { status("템플릿 파일이 없어요: " + tpl, "err"); return; }
     if (state.style === "gfx" && !tpl) { status("자막 모양 템플릿(.mogrt)을 먼저 골라 주세요. ('템플릿 만드는 법' 참고)", "err"); $("help").style.display = "block"; return; }
     setBusy(true); progress(0); E.resetCancel();
     var rg, clips, vIdx, aIdx;

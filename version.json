@@ -1,7 +1,7 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "repo": "kimnemo13/monosync",
-  "notes": "자막 모양 템플릿 목록: 로컬 템플릿 폴더로 내보내면 미리보기와 함께 바로 나타나고 자동 선택",
+  "notes": "[내레이션 자막] 버튼: 누르면 내레이션 자막 모양으로 바로 싱크 (템플릿 내장)",
   "files": [
     "index.html",
     "js/main.js",
@@ -13,9 +13,12 @@
     "install-mac.command",
     "uninstall-mac.command",
     "README.md",
-    "설치안내.txt"
+    "설치안내.txt",
+    "templates/narration.mogrt",
+    "templates/narration.png"
   ],
   "versions": [
+    "1.3.0",
     "1.2.0",
     "1.1.1",
     "1.1.0",
