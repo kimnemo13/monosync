@@ -121,42 +121,18 @@
     <div id="trackInfo" class="muted"></div>
   </div>
 
-  <!-- 3. 스타일 -->
+  <!-- 3. 자막 모양 -->
   <div class="sec">
     <h3>3 · 자막 모양</h3>
-    <div class="seg"><button id="sGfx" class="on">그래픽 클립 (내 템플릿)</button><button id="sCap">캡션 트랙</button></div>
-    <div id="gfxBox">
-      <div class="presets" id="presets">
-        <button class="preset" data-id="narration" title="이 모양으로 바로 싱크">
-          <span class="pimg" style="background-image:url('./templates/narration.png')"></span>
-          <span class="pname">내레이션 자막</span>
-          <span class="pgo">누르면 바로 싱크 ▶</span>
-        </button>
-      </div>
-      <div class="tplbar">
-        <span class="muted" style="font-weight:600;color:#b8b8b8">내 템플릿</span>
-        <span class="muted grow" id="tplHint"></span>
-        <button id="btnTplRefresh" class="link">↻</button>
-      </div>
-      <div id="tplGrid"></div>
-      <div class="rowbtn">
-        <button id="btnHelp" class="link">템플릿 만드는 법 (3번 클릭)</button>
-        <span class="grow"></span>
-        <button id="btnTplFolder" class="link">폴더 열기</button>
-        <button id="btnTpl" class="link">다른 파일 고르기</button>
-      </div>
-      <div id="help">
-        V2의 자막 클립 하나로 만들면, 폰트·크기·박스·위치가 그대로 따라오고 글자만 자막마다 바뀌어 들어가요.<br>
-        ① 자막 클립을 <b>우클릭 › 모션 그래픽 템플릿으로 내보내기</b><br>
-        ② 이름(예: 김시선 자막)을 쓰고, 대상은 <b>로컬 템플릿 폴더</b> 그대로 → <b>확인</b><br>
-        ③ 패널로 돌아오면 <b>새 템플릿이 목록에 나타나고 자동으로 골라져요</b>.<br>
-        <span class="muted">스타일을 여러 개 만들어 두고 눌러서 바꿔 쓸 수 있어요.</span>
-      </div>
-      <label class="chk"><input type="checkbox" id="chkReplace"> 범위 안에 이미 있는 자막 클립은 지우고 넣기</label>
+    <div class="presets" id="presets">
+      <button class="preset on" data-id="narration" title="이 모양으로 바로 싱크">
+        <span class="pimg" style="background-image:url('./templates/narration.png')"></span>
+        <span class="pname">내레이션 자막</span>
+        <span class="pgo">누르면 바로 싱크 ▶</span>
+      </button>
     </div>
-    <div id="capBox" style="display:none" class="muted" >
-      새 캡션 트랙에 넣어요. 트랙 스타일을 고르면 내 형식이 적용되고, <b>그래픽 및 타이틀 › 캡션을 그래픽으로 업그레이드</b>로 그래픽 클립으로 바꿀 수 있어요.
-    </div>
+    <label class="chk"><input type="checkbox" id="chkReplace"> 범위 안에 이미 있는 자막 클립은 지우고 넣기</label>
+    <div class="muted" style="margin-top:6px">싱크 전에 프로젝트를 자동 저장해요.</div>
   </div>
 
   <!-- 4. 싱크 -->

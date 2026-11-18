@@ -268,6 +268,10 @@
   function readText(file) { return fs.readFileSync(file, "utf8"); }
 
   window.MSEngine = {
+    journal: function (o) {      // 싱크 진행 기록 — 프리미어가 꺼져도 다음에 어디서 멈췄는지 알 수 있게
+      try { mkdirp(DATA); if (o === null) fs.unlinkSync(path.join(DATA, "sync-journal.json")); else fs.writeFileSync(path.join(DATA, "sync-journal.json"), JSON.stringify(o)); } catch (e) {}
+    },
+    readJournal: function () { try { return JSON.parse(fs.readFileSync(path.join(DATA, "sync-journal.json"), "utf8")); } catch (e) { return null; } },
     fileExists: function (p) { try { return fs.statSync(p).isFile(); } catch (e) { return false; } },
     listTemplates: listTemplates, templateThumb: templateThumb, openTemplateFolder: openTemplateFolder,
     tools: tools, transcribe: transcribe, transcribeTrack: transcribeTrack, wordsFromTrack: wordsFromTrack, mapTime: mapTime,

@@ -193,85 +193,16 @@
   $("rIO").addEventListener("click", function () { state.range = "io"; renderTracks(); });
   window.addEventListener("focus", function () { if (!state.busy) refresh(); });
 
-  // ---------- 3) 스타일 ----------
-  // 내장 템플릿: "builtin:narration" → 확장 폴더/templates/narration.mogrt
-  var BUILTIN = { narration: { file: "templates/narration.mogrt", name: "내레이션 자막" } };
+  // ---------- 3) 자막 모양: 내장 [내레이션 자막] ----------
+  var TEMPLATE = { file: "templates/narration.mogrt", name: "내레이션 자막" };
   function extRoot() {
     try { return decodeURIComponent(window.__adobe_cep__.getSystemPath("extension")).replace(/^file:\/\//, ""); } catch (e) { return ""; }
   }
-  function tplPath(v) { var m = /^builtin:(\w+)$/.exec(v || ""); return m && BUILTIN[m[1]] ? E.path.join(extRoot(), BUILTIN[m[1]].file) : v; }
-  function tplName(v) { var m = /^builtin:(\w+)$/.exec(v || ""); return m && BUILTIN[m[1]] ? BUILTIN[m[1]].name : (v ? E.path.basename(v).replace(/\.mogrt$/i, "") : ""); }
-  function markPresets() {
-    var cur = load("tpl", "");
-    Array.prototype.forEach.call(document.querySelectorAll(".preset"), function (b) { b.classList.toggle("on", cur === "builtin:" + b.getAttribute("data-id")); });
-    $("btnSync").textContent = state.busy ? "싱크 중…" : (state.style === "gfx" && cur ? "싱크 · " + tplName(cur) : "싱크");
-  }
+  function tplPath() { return E.path.join(extRoot(), TEMPLATE.file); }
+  function markPresets() { $("btnSync").textContent = state.busy ? "싱크 중…" : "싱크 · " + TEMPLATE.name; }
   Array.prototype.forEach.call(document.querySelectorAll(".preset"), function (b) {
-    b.addEventListener("click", function () {
-      if (state.busy) return;
-      save("tpl", "builtin:" + b.getAttribute("data-id"));
-      state.style = "gfx"; save("style", "gfx");
-      renderStyle(); scanTemplates(true);
-      sync();                                               // 누르면 바로 싱크
-    });
+    b.addEventListener("click", function () { if (!state.busy) sync(); });     // 누르면 바로 싱크
   });
-  // 템플릿 목록: 프리미어 로컬 템플릿 폴더를 자동으로 훑어, 새로 내보낸 템플릿은 바로 골라 줌
-  var tplKnown = null, thumbCache = {};
-  function renderStyle() {
-    $("sGfx").className = state.style === "gfx" ? "on" : ""; $("sCap").className = state.style === "cap" ? "on" : "";
-    $("gfxBox").style.display = state.style === "gfx" ? "block" : "none"; $("capBox").style.display = state.style === "cap" ? "block" : "none";
-    scanTemplates(false);
-  }
-  function scanTemplates(announce) {
-    if (!E || !E.listTemplates) return;
-    var cur = load("tpl", "");
-    var list = E.listTemplates([cur]);
-    var paths = list.map(function (t) { return t.path; }).join("|");
-    var fresh = [];
-    if (tplKnown) list.forEach(function (t) { if (!tplKnown[t.path]) fresh.push(t); });
-    var first = tplKnown === null;
-    tplKnown = {}; list.forEach(function (t) { tplKnown[t.path] = 1; });
-    if (fresh.length) {                                    // 방금 내보낸 템플릿 → 자동 선택
-      save("tpl", fresh[0].path); cur = fresh[0].path;
-      status("새 템플릿 「" + fresh[0].name + "」을 골랐어요.", "ok");
-      $("help").style.display = "none";
-    } else if (!cur && first) { save("tpl", "builtin:narration"); cur = "builtin:narration"; }
-    else if (cur && !/^builtin:/.test(cur) && !tplKnown[cur] && first) { save("tpl", "builtin:narration"); cur = "builtin:narration"; }
-    markPresets();
-    if (!fresh.length && !announce && renderStyle.lastPaths === paths && renderStyle.lastCur === cur) return;
-    renderStyle.lastPaths = paths; renderStyle.lastCur = cur;
-    var g = $("tplGrid"); g.innerHTML = "";
-    if (!list.length) {
-      g.innerHTML = '<div class="tempty">다른 모양이 필요하면 자막 클립을 <b>우클릭 › 모션 그래픽 템플릿으로 내보내기</b> → 확인. 여기에 바로 나타나요.</div>';
-      $("tplHint").textContent = "";
-      return;
-    }
-    list.forEach(function (t) {
-      var c = document.createElement("div");
-      c.className = "tcard" + (t.path === cur ? " on" : "");
-      c.title = t.path;
-      c.innerHTML = '<div class="th">미리보기 없음</div><div class="tn"></div>';
-      c.querySelector(".tn").textContent = t.name;
-      if (fresh.some(function (f) { return f.path === t.path; })) { var n = document.createElement("span"); n.className = "new"; n.textContent = "새로"; c.querySelector(".tn").appendChild(n); }
-      var th = c.querySelector(".th");
-      function show(img) { if (img) { th.style.backgroundImage = 'url("file://' + encodeURI(img) + '")'; th.textContent = ""; } }
-      if (thumbCache[t.path] !== undefined) show(thumbCache[t.path]);
-      else E.templateThumb(t.path, function (img) { thumbCache[t.path] = img; show(img); });
-      c.addEventListener("click", function () { save("tpl", t.path); scanTemplates(true); status("자막 모양: " + t.name + " — 아래 싱크를 누르세요."); });
-      g.appendChild(c);
-    });
-    $("tplHint").textContent = "";
-  }
-  $("sGfx").addEventListener("click", function () { state.style = "gfx"; save("style", "gfx"); renderStyle(); markPresets(); });
-  $("sCap").addEventListener("click", function () { state.style = "cap"; save("style", "cap"); renderStyle(); markPresets(); });
-  $("btnTpl").addEventListener("click", function () {
-    call("MS_pickMogrt()").then(function (o) { if (o.ok) { save("tpl", o.path); scanTemplates(true); status("자막 모양: " + E.path.basename(o.path)); } });
-  });
-  $("btnTplRefresh").addEventListener("click", function () { scanTemplates(true); });
-  $("btnTplFolder").addEventListener("click", function () { E.openTemplateFolder(); });
-  window.addEventListener("focus", function () { if (state.style === "gfx") scanTemplates(false); });
-  setInterval(function () { if (!state.busy && state.style === "gfx") scanTemplates(false); }, 3000);
-  $("btnHelp").addEventListener("click", function () { var h = $("help"); h.style.display = h.style.display === "block" ? "none" : "block"; });
   $("chkReplace").checked = load("replace", "0") === "1";
   $("chkReplace").addEventListener("change", function () { save("replace", this.checked ? "1" : "0"); });
 
@@ -300,9 +231,8 @@
     if (!checkTools()) { status("설치가 덜 됐어요.", "err"); return; }
     var L = lines();
     if (!L.length) { status("자막 텍스트를 먼저 넣어 주세요.", "err"); return; }
-    var tpl = tplPath(load("tpl", ""));
-    if (state.style === "gfx" && tpl && !E.fileExists(tpl)) { status("템플릿 파일이 없어요: " + tpl, "err"); return; }
-    if (state.style === "gfx" && !tpl) { status("자막 모양 템플릿(.mogrt)을 먼저 골라 주세요. ('템플릿 만드는 법' 참고)", "err"); $("help").style.display = "block"; return; }
+    var tpl = tplPath();
+    if (!E.fileExists(tpl)) { status("내레이션 자막 템플릿이 없어요: " + tpl + "\n업데이트 확인을 누르거나 다시 설치해 주세요.", "err"); return; }
     setBusy(true); progress(0); E.resetCancel();
     var rg, clips, vIdx, aIdx;
     refresh().then(function () {
@@ -323,60 +253,121 @@
       var r = state.result;
       if (opts().mode === "same" && r.overall < 0.35)
         throw new Error("음성과 자막이 거의 안 맞아요(" + Math.round(r.overall * 100) + "%). 음성 트랙(A" + (aIdx + 1) + ")과 음성 언어를 확인해 주세요. 번역 자막이면 세부 설정에서 '번역 자막'을 고르세요.");
-      return state.style === "gfx" ? placeGraphics(tpl, vIdx, rg) : placeCaptions();
+      return placeGraphics(tpl, vIdx, rg);
     }).then(function (msg) {
       progress(null); setBusy(false);
       if (msg) status(msg.text, msg.kind);
     }).catch(function (e) {
-      progress(null); setBusy(false);
+      progress(null); setBusy(false); E.journal(null);
       status(e.message || String(e), "err");
     });
   }
   $("btnSync").addEventListener("click", sync);
   $("btnStop").addEventListener("click", function () { state.stop = true; E.cancel(); });
 
+  // 템플릿 글자 값(raw)에서 글자만 바꾼 새 값 만들기 — JSON으로 정확히 고치고, 앞 4바이트 길이 머리말·스타일 구간 길이도 맞춤
+  function utf8len(str) { return unescape(encodeURIComponent(str)).length; }
+  function rewriteRaw(raw, text) {
+    var pre = "", body = raw;
+    if (raw.charAt(0) !== "{" && raw.indexOf("{") === 4) { pre = raw.substring(0, 4); body = raw.substring(4); }
+    var j = JSON.parse(body);
+    var key = "textEditValue" in j ? "textEditValue" : ("mText" in j ? "mText" : null);
+    if (!key) throw new Error("템플릿 글자 칸 형식을 모르겠어요.");
+    var want = text.replace(/\n/g, "\r");
+    j[key] = want;
+    if (Array.isArray(j.fontTextRunLength) && j.fontTextRunLength.length) {      // 스타일 구간 길이 합 = 글자 수
+      var runs = j.fontTextRunLength, others = 0;
+      for (var i = 0; i < runs.length - 1; i++) others += runs[i];
+      if (others >= want.length) { j.fontTextRunLength = [want.length].concat(runs.slice(1).map(function () { return 0; })); }
+      else runs[runs.length - 1] = want.length - others;
+    }
+    var nb = JSON.stringify(j);
+    if (pre) {
+      var c = [0, 1, 2, 3].map(function (k) { return pre.charCodeAt(k) & 255; });
+      var be = ((c[0] * 256 + c[1]) * 256 + c[2]) * 256 + c[3], le = ((c[3] * 256 + c[2]) * 256 + c[1]) * 256 + c[0], v = -1, big = true;
+      if (be === body.length) v = nb.length; else if (le === body.length) { v = nb.length; big = false; }
+      else if (be === utf8len(body)) v = utf8len(nb); else if (le === utf8len(body)) { v = utf8len(nb); big = false; }
+      if (v >= 0) { var b = [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255]; if (!big) b.reverse(); pre = String.fromCharCode(b[0], b[1], b[2], b[3]); }
+    }
+    return { raw: pre + nb, key: key, want: want };
+  }
+  function readText(raw, key) {
+    try { var body = raw.indexOf("{") === 4 ? raw.substring(4) : raw; return JSON.parse(body)[key]; } catch (e) { return null; }
+  }
+
+  // 안전하게 하나씩: [올리기 1번] → [나타날 때까지 기다림] → [클립 수 확인] → [글자 1번 쓰기] → [확인]
   function placeGraphics(tpl, vIdx, rg) {
     var items = state.result.items, from = items[0].start - 0.01, to = items[items.length - 1].end + 0.01;
+    var placed = [], k = 0, count0 = 0, total = items.length;
+    state.placed = { v: vIdx, starts: placed };
+    state.stop = false;
+    function jr(step) { E.journal({ state: "running", step: step, k: k + 1, total: total, text: items[k] ? items[k].text : "", at: Date.now(), v: vIdx, placed: placed.slice() }); }
+    function fail(msg, diagText) {
+      if (diagText) diag(diagText);
+      E.journal(null);
+      throw new Error(msg + "\n" + placed.length + "개까지 넣고 멈췄어요. (넣은 것은 '방금 넣은 자막 지우기'로 지울 수 있어요)");
+    }
     var pre = $("chkReplace").checked ? call("MS_removeRange(" + vIdx + "," + from + "," + to + ")") :
       call("MS_countRange(" + vIdx + "," + from + "," + to + ")").then(function (o) {
         if (o.ok && o.n > 0) throw new Error("V" + (vIdx + 1) + "의 이 구간(" + fmt(from) + "–" + fmt(to) + ")에 이미 자막 클립이 " + o.n + "개 있어요.\n'범위 안에 이미 있는 자막 클립은 지우고 넣기'를 켜거나 다른 트랙을 고른 뒤 다시 싱크하세요. (음성 인식은 저장돼 있어 바로 끝나요)");
-        return o;
       });
-    var placed = [];
-    state.placed = { v: vIdx, starts: placed };
-    state.stop = false;
     return pre.then(function () {
-      var k = 0;
+      status("프로젝트 저장 중… (혹시 프리미어가 멈춰도 작업이 남도록)");
+      return call("MS_saveProject()");
+    }).then(function () { return call("MS_count(" + vIdx + ")"); }).then(function (o) {
+      if (!o.ok) fail(o.reason);
+      count0 = o.n;
       function next() {
-        if (k >= items.length) return null;
-        if (state.stop) throw new Error("중지했어요. " + placed.length + "개까지 넣었어요.");
-        var it = items[k], text = it.text.split("|").map(function (s) { return s.trim(); }).join("\n");
-        progress(0.85 + 0.15 * k / items.length);
-        status("V" + (vIdx + 1) + "에 자막 넣는 중… (" + (k + 1) + "/" + items.length + ")");
-        var args = vIdx + "," + it.start.toFixed(5) + "," + it.end.toFixed(5) + "," + q(text);
-        return call("MS_place(" + q(tpl) + "," + args + ")").then(function settle(o, tries) {
-          tries = tries || 0;
-          if (o.ok && o.state === "pending") {
-            if (tries > 40) throw new Error((k + 1) + "번째 자막 클립이 타임라인에 나타나지 않았어요.");
-            return sleep(150).then(function () { return call("MS_fill(" + args + ")"); }).then(function (o2) { return settle(o2, tries + 1); });
-          }
-          if (o.state === "done") { placed.push(it.start); k++; return next(); }
-          if (o.state === "textfail") {
-            placed.push(it.start);
-            diag((o.reason || "") + (o.diag ? "\n\n" + o.diag : ""));
-            var undo = call("MS_removeAt(" + vIdx + ",'" + placed.join(",") + "')");
-            return undo.then(function () {
-              placed.length = 0;
-              throw new Error("템플릿에 글자를 넣지 못했어요(" + o.reason + "). 넣은 클립은 지웠어요.\n아래 진단 내용을 Claude에게 보내 주세요. 급하면 '캡션 트랙'으로 넣을 수 있어요.");
+        if (k >= total) return null;
+        if (state.stop) fail("중지했어요.");
+        var it = items[k], text = it.text.split("|").map(function (x) { return x.trim(); }).join("\n");
+        var first = placed.length === 0;
+        progress(0.85 + 0.15 * k / total);
+        status("V" + (vIdx + 1) + "에 자막 넣는 중… (" + (k + 1) + "/" + total + ")" + (first ? " — 첫 자막은 템플릿을 불러오느라 조금 걸려요" : ""));
+        jr("올리기");
+        return call("MS_import(" + q(tpl) + "," + vIdx + "," + it.start.toFixed(5) + ")").then(function (o1) {
+          if (!o1.ok) fail(o1.reason);
+          jr("나타나기 기다림");
+          var tries = 0, limit = first ? 60 : 24;                    // 첫 자막 최대 15초, 그 뒤 6초
+          function wait() {
+            return sleep(250).then(function () { return call("MS_probe(" + vIdx + "," + it.start.toFixed(5) + ")"); }).then(function (p) {
+              if (!p.ok) fail(p.reason);
+              if (p.state === "pending") { if (++tries > limit) fail((k + 1) + "번째 자막 클립이 타임라인에 나타나지 않았어요."); return wait(); }
+              return p;
             });
           }
-          throw new Error(o.reason || "자막 넣기 실패");
+          return wait();
+        }).then(function (p) {
+          return call("MS_count(" + vIdx + ")").then(function (c) {      // 한 번 올렸으면 클립은 정확히 하나 늘어야 함
+            if (c.ok && c.n > count0 + placed.length + 1) {
+              var extra = c.n - count0 - placed.length;
+              placed.push(it.start);
+              fail("자막 하나를 올렸는데 클립이 " + extra + "개 생겼어요. 이상 동작이라 바로 멈췄어요.");
+            }
+            placed.push(it.start);
+            if (p.state === "notext") fail("템플릿에서 글자 칸을 찾지 못했어요.", p.diag);
+            var nr;
+            try { nr = rewriteRaw(p.raw, text); } catch (e) { fail(e.message, "글자 칸 '" + p.name + "' 값:\n" + String(p.raw).slice(0, 800)); }
+            jr("글자 쓰기");
+            return call("MS_write(" + vIdx + "," + it.start.toFixed(5) + "," + it.end.toFixed(5) + "," + p.idx + "," + q(nr.raw) + ")").then(function (w) {
+              if (!w.ok) fail(w.reason);
+              if (readText(w.back, nr.key) !== nr.want) {
+                call("MS_removeOne(" + vIdx + "," + it.start.toFixed(5) + ")");
+                placed.pop();
+                fail("템플릿에 글자가 들어가지 않았어요. 아래 내용을 Claude에게 보내 주세요.",
+                  "글자 칸: " + p.name + "\n원래 값: " + String(p.raw).slice(0, 600) + "\n쓴 값: " + nr.raw.slice(0, 600) + "\n다시 읽은 값: " + String(w.back).slice(0, 600));
+              }
+              k++;
+              return sleep(first ? 400 : 80).then(next);              // 프리미어가 숨 돌릴 틈
+            });
+          });
         });
       }
       return next();
     }).then(function () {
+      E.journal(null);
       var ng = items.filter(function (x) { return x.how === "guess"; }).length;
-      return { text: "V" + (vIdx + 1) + "에 자막 " + items.length + "개를 넣었어요." + (ng ? " 음성에서 못 찾은 " + ng + "개는 주황색 — 앞뒤 사이에 추정 배치했어요." : "") + " 줄을 누르면 그 위치로 가요.", kind: ng ? "warn" : "ok" };
+      return { text: "V" + (vIdx + 1) + "에 자막 " + total + "개를 넣었어요." + (ng ? " 음성에서 못 찾은 " + ng + "개는 주황색 — 앞뒤 사이에 추정 배치했어요." : "") + " 줄을 누르면 그 위치로 가요.", kind: ng ? "warn" : "ok" };
     });
   }
 
@@ -388,16 +379,6 @@
       return E.writeText(E.path.join(dir, nm), "﻿" + A.toSRT(state.result.items));
     });
   }
-  function placeCaptions() {
-    return saveSRT().then(function (f) {
-      return call("MS_addCaptions(" + q(f) + ")").then(function (o) {
-        if (!o.ok) throw new Error(o.reason + "\n(SRT: " + f + ")");
-        state.placed = null;
-        return { text: "새 캡션 트랙에 자막 " + state.result.items.length + "개를 넣었어요.", kind: "ok" };
-      });
-    });
-  }
-
   function renderResult() {
     var box = $("result"), r = state.result; box.innerHTML = "";
     $("resultWrap").style.display = r ? "block" : "none";
@@ -417,7 +398,7 @@
   }
   $("btnUndo").addEventListener("click", function () {
     var p = state.placed;
-    if (!p || !p.starts.length) { status("지울 자막이 없어요. (캡션 트랙은 타임라인에서 트랙째 지우세요)", "warn"); return; }
+    if (!p || !p.starts.length) { status("지울 자막이 없어요.", "warn"); return; }
     call("MS_removeAt(" + p.v + ",'" + p.starts.join(",") + "')").then(function (o) {
       status(o.ok ? "방금 넣은 자막 " + o.n + "개를 지웠어요." : o.reason, o.ok ? "ok" : "err");
       if (o.ok) state.placed = null;
@@ -502,7 +483,17 @@
   }
   safe("업데이트", initUpdater);
   safe("텍스트", function () { $("text").value = load("text", ""); updateCount(); });
-  safe("스타일", function () { state.style = load("style", "gfx"); renderStyle(); });
+  safe("자막 모양", markPresets);
+  safe("지난 싱크 확인", function () {
+    var j = E.readJournal();
+    if (!j || j.state !== "running") return;
+    E.journal(null);
+    if (j.placed && j.placed.length) state.placed = { v: j.v, starts: j.placed };
+    status("지난번 싱크가 끝나지 않고 멈췄어요 — " + j.total + "개 중 " + j.k + "번째 자막의 '" + j.step + "' 단계 (" + new Date(j.at).toLocaleString() + ").\n" +
+      "그때 넣던 자막: " + j.text + "\n" + (j.placed && j.placed.length ? "그 전까지 넣은 " + j.placed.length + "개는 '방금 넣은 자막 지우기'로 지울 수 있어요. " : "") +
+      "이 문구를 Claude에게 보내 주시면 원인을 고칠게요.", "warn");
+    $("resultWrap").style.display = "block";
+  });
   safe("설치 확인", checkTools);
   safe("시퀀스", refresh);
 })();

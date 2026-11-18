@@ -248,40 +248,71 @@ function MS_clipDiag(clip) {
 }
 function MS_takeDiag() { var d = MS_lastDiag; MS_lastDiag = ""; return MS_q(d); }
 
-// ---------- 템플릿 올리기 ----------
+// ---------- 템플릿 올리기 (안전 방식: 한 번에 한 가지 일만) ----------
+// 1) MS_count(v)                 자막 트랙 클립 수
+// 2) MS_import(mogrt, v, s)      템플릿을 s초에 한 번만 올림 (재시도 없음)
+// 3) MS_probe(v, s)              s초의 클립을 찾아 글자 칸 원래 값을 돌려줌 (없으면 pending)
+// 4) MS_write(v, s, e, k, raw)   길이 맞추고 글자 칸에 한 번만 씀 → 다시 읽은 값을 돌려줌
 function MS_findAt(tr, s) {
     for (var i = 0; i < tr.clips.numItems; i++) if (Math.abs(tr.clips[i].start.seconds - s) < 0.02) return tr.clips[i];
     return null;
 }
-function MS_finish(clip, s, e, text) {
-    try { clip.end = MS_time(e); } catch (eE) {}
-    var r = MS_setClipText(clip, decodeURIComponent(text));
-    if (r === "OK") return '{"ok":true,"state":"done"}';
-    return '{"ok":false,"state":"textfail","reason":' + MS_q(r) + ',"diag":' + MS_takeDiag() + '}';
+function MS_count(vIdx) {
+    try { var tr = MS_vtrack(vIdx); return tr ? '{"ok":true,"n":' + tr.clips.numItems + '}' : MS_fail("트랙 없음"); }
+    catch (e) { return MS_fail(String(e)); }
 }
-function MS_place(mogrtEnc, vIdx, s, e, text) {
+function MS_saveProject() {
+    try { app.project.save(); return '{"ok":true}'; } catch (e) { return MS_fail("프로젝트 저장 실패: " + e); }
+}
+function MS_import(mogrtEnc, vIdx, s) {
     try {
         var seq = MS_seq(); if (!seq) return MS_fail("열려 있는 시퀀스가 없어요.");
         var path = decodeURIComponent(mogrtEnc);
         if (!new File(path).exists) return MS_fail("템플릿 파일이 없어요: " + path);
-        var tr = MS_vtrack(vIdx); if (!tr) return MS_fail("V" + (vIdx + 1) + " 트랙이 없어요.");
-        var item = null;
-        try { item = seq.importMGT(path, MS_time(s).ticks, vIdx, -1); }
-        catch (e1) { return MS_fail("템플릿 올리기 실패: " + e1); }
-        var clip = null;
-        try { if (item && item.start && Math.abs(item.start.seconds - s) < 0.02) clip = item; } catch (e2) {}
-        if (!clip) clip = MS_findAt(tr, s);
-        if (!clip) return '{"ok":true,"state":"pending"}';
-        return MS_finish(clip, s, e, text);
-    } catch (e) { return MS_fail("배치 실패: " + e); }
+        if (!MS_vtrack(vIdx)) return MS_fail("V" + (vIdx + 1) + " 트랙이 없어요.");
+        seq.importMGT(path, MS_time(s).ticks, vIdx, -1);
+        return '{"ok":true}';
+    } catch (e) { return MS_fail("템플릿 올리기 실패: " + e); }
 }
-function MS_fill(vIdx, s, e, text) {
+// 글자 칸 찾기: MGT 컴포넌트에서 textEditValue / mText가 든 속성
+function MS_textProp(clip) {
+    var mgt = null;
+    try { mgt = clip.getMGTComponent(); } catch (e0) {}
+    if (!mgt) return null;
+    var props = mgt.properties;
+    for (var j = 0; j < props.numItems; j++) {
+        var raw; try { raw = props[j].getValue(); } catch (e1) { continue; }
+        if (typeof raw === "string" && /"(textEditValue|mText)"\s*:/.test(raw)) return { prop: props[j], idx: j, raw: raw };
+    }
+    return null;
+}
+function MS_probe(vIdx, s) {
     try {
         var tr = MS_vtrack(vIdx); if (!tr) return MS_fail("트랙 없음");
         var clip = MS_findAt(tr, s);
         if (!clip) return '{"ok":true,"state":"pending"}';
-        return MS_finish(clip, s, e, text);
-    } catch (er) { return MS_fail(String(er)); }
+        var tp = MS_textProp(clip);
+        if (!tp) return '{"ok":true,"state":"notext","diag":' + MS_q(MS_clipDiag(clip)) + '}';
+        return '{"ok":true,"state":"found","idx":' + tp.idx + ',"raw":' + MS_q(tp.raw) + ',"name":' + MS_q(tp.prop.displayName) + '}';
+    } catch (e) { return MS_fail(String(e)); }
+}
+function MS_write(vIdx, s, e, idx, rawEnc) {
+    try {
+        var tr = MS_vtrack(vIdx); if (!tr) return MS_fail("트랙 없음");
+        var clip = MS_findAt(tr, s); if (!clip) return MS_fail("클립을 다시 찾지 못했어요.");
+        try { clip.end = MS_time(e); } catch (eE) {}
+        var mgt = clip.getMGTComponent(), p = mgt.properties[idx];
+        p.setValue(decodeURIComponent(rawEnc), true);
+        var back = ""; try { back = String(p.getValue()); } catch (eB) {}
+        return '{"ok":true,"back":' + MS_q(back) + '}';
+    } catch (er) { return MS_fail("글자 쓰기 실패: " + er); }
+}
+function MS_removeOne(vIdx, s) {
+    try {
+        var tr = MS_vtrack(vIdx); if (!tr) return MS_fail("트랙 없음");
+        var c = MS_findAt(tr, s); if (c) c.remove(false, false);
+        return '{"ok":true}';
+    } catch (e) { return MS_fail(String(e)); }
 }
 
 // ---------- 기타 ----------
