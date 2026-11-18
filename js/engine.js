@@ -104,6 +104,50 @@
       }, function (e) { try { fs.unlinkSync(wav); } catch (e2) {} throw e; });
   }
 
+  // ---------- 자막 템플릿(.mogrt) 목록 ----------
+  // 프리미어 '로컬 템플릿 폴더'(내보내기 대상으로 고르면 여기 저장됨)와 monoSync 템플릿 폴더를 훑는다.
+  var TPL_DIRS = [
+    path.join(HOME, "Library", "Application Support", "Adobe", "Common", "Motion Graphics Templates"),
+    path.join(DATA, "templates")
+  ];
+  var THUMBS = path.join(DATA, "thumbs");
+  function listTemplates(extra) {
+    var out = [], seen = {};
+    function add(p) {
+      if (seen[p]) return;
+      try { var st = fs.statSync(p); if (!st.isFile()) return; seen[p] = 1; out.push({ path: p, name: path.basename(p).replace(/\.mogrt$/i, ""), mtime: st.mtimeMs }); } catch (e) {}
+    }
+    function walk(dir, depth) {
+      var ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+      ents.forEach(function (d) {
+        var p = path.join(dir, d.name);
+        if (d.isDirectory() && depth < 3) walk(p, depth + 1);
+        else if (/\.mogrt$/i.test(d.name)) add(p);
+      });
+    }
+    TPL_DIRS.forEach(function (d) { walk(d, 0); });
+    (extra || []).forEach(function (p) { if (p) add(p); });
+    return out.sort(function (a, b) { return b.mtime - a.mtime; });
+  }
+  // 템플릿 안의 미리보기 그림(thumb.png)을 꺼내 캐시 → file 경로. 없으면 ""
+  function templateThumb(p, cb) {
+    try {
+      var st = fs.statSync(p);
+      var key = crypto.createHash("sha1").update(p + "|" + st.mtimeMs).digest("hex").slice(0, 16);
+      var out = path.join(THUMBS, key + ".png");
+      if (fs.existsSync(out)) return cb(out);
+      mkdirp(THUMBS);
+      cp.execFile("/usr/bin/unzip", ["-p", p, "thumb.png"], { encoding: "buffer", maxBuffer: 20 * 1024 * 1024 }, function (err, buf) {
+        if (err || !buf || buf.length < 100) return cb("");
+        try { fs.writeFileSync(out, buf); cb(out); } catch (e) { cb(""); }
+      });
+    } catch (e) { cb(""); }
+  }
+  function openTemplateFolder() {
+    var d = TPL_DIRS[0]; mkdirp(d);
+    cp.execFile("/usr/bin/open", [d], function () {});
+  }
+
   // ---------- 음성 트랙 전체 받아쓰기 ----------
   // clips: [{path,start,end,inPoint,outPoint,speed}] (타임라인 순)
   // 클립 소리를 0.4초 틈을 두고 이어 붙여 whisper를 한 번만 돌리고, 단어 시간을 타임라인 시간으로 되돌린다.
@@ -224,6 +268,7 @@
   function readText(file) { return fs.readFileSync(file, "utf8"); }
 
   window.MSEngine = {
+    listTemplates: listTemplates, templateThumb: templateThumb, openTemplateFolder: openTemplateFolder,
     tools: tools, transcribe: transcribe, transcribeTrack: transcribeTrack, wordsFromTrack: wordsFromTrack, mapTime: mapTime,
     cancel: function () { transcribeTrack.cancelled = true; cancel(); }, resetCancel: function () { transcribeTrack.cancelled = false; }, clearCache: clearCache,
     writeText: writeText, readText: readText, clipRead: clipRead, clipWrite: clipWrite, dataDir: DATA, home: HOME, path: path

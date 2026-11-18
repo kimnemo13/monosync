@@ -193,18 +193,61 @@
   window.addEventListener("focus", function () { if (!state.busy) refresh(); });
 
   // ---------- 3) 스타일 ----------
+  // 템플릿 목록: 프리미어 로컬 템플릿 폴더를 자동으로 훑어, 새로 내보낸 템플릿은 바로 골라 줌
+  var tplKnown = null, thumbCache = {};
   function renderStyle() {
     $("sGfx").className = state.style === "gfx" ? "on" : ""; $("sCap").className = state.style === "cap" ? "on" : "";
     $("gfxBox").style.display = state.style === "gfx" ? "block" : "none"; $("capBox").style.display = state.style === "cap" ? "block" : "none";
-    var p = load("tpl", "");
-    $("tplName").textContent = p ? E.path.basename(p) : "템플릿을 골라 주세요";
-    $("tplName").title = p; $("tplName").className = "nm" + (p ? "" : " none");
+    scanTemplates(false);
+  }
+  function scanTemplates(announce) {
+    if (!E || !E.listTemplates) return;
+    var cur = load("tpl", "");
+    var list = E.listTemplates([cur]);
+    var paths = list.map(function (t) { return t.path; }).join("|");
+    var fresh = [];
+    if (tplKnown) list.forEach(function (t) { if (!tplKnown[t.path]) fresh.push(t); });
+    var first = tplKnown === null;
+    tplKnown = {}; list.forEach(function (t) { tplKnown[t.path] = 1; });
+    if (fresh.length) {                                    // 방금 내보낸 템플릿 → 자동 선택
+      save("tpl", fresh[0].path); cur = fresh[0].path;
+      status("새 템플릿 「" + fresh[0].name + "」을 골랐어요.", "ok");
+      $("help").style.display = "none";
+    } else if ((!cur || !tplKnown[cur]) && list.length && first) { save("tpl", list[0].path); cur = list[0].path; }
+    if (!fresh.length && !announce && renderStyle.lastPaths === paths && renderStyle.lastCur === cur) return;
+    renderStyle.lastPaths = paths; renderStyle.lastCur = cur;
+    var g = $("tplGrid"); g.innerHTML = "";
+    if (!list.length) {
+      g.innerHTML = '<div class="tempty">아직 템플릿이 없어요.<br>V2의 자막 클립을 <b>우클릭 › 모션 그래픽 템플릿으로 내보내기</b> → 확인<br>하면 여기에 바로 나타나요.</div>';
+      $("tplHint").textContent = "템플릿 없음";
+      return;
+    }
+    list.forEach(function (t) {
+      var c = document.createElement("div");
+      c.className = "tcard" + (t.path === cur ? " on" : "");
+      c.title = t.path;
+      c.innerHTML = '<div class="th">미리보기 없음</div><div class="tn"></div>';
+      c.querySelector(".tn").textContent = t.name;
+      if (fresh.some(function (f) { return f.path === t.path; })) { var n = document.createElement("span"); n.className = "new"; n.textContent = "새로"; c.querySelector(".tn").appendChild(n); }
+      var th = c.querySelector(".th");
+      function show(img) { if (img) { th.style.backgroundImage = 'url("file://' + encodeURI(img) + '")'; th.textContent = ""; } }
+      if (thumbCache[t.path] !== undefined) show(thumbCache[t.path]);
+      else E.templateThumb(t.path, function (img) { thumbCache[t.path] = img; show(img); });
+      c.addEventListener("click", function () { save("tpl", t.path); scanTemplates(true); status("자막 모양: " + t.name); });
+      g.appendChild(c);
+    });
+    var sel = list.filter(function (t) { return t.path === cur; })[0];
+    $("tplHint").textContent = sel ? "선택: " + sel.name : "템플릿을 눌러 고르세요";
   }
   $("sGfx").addEventListener("click", function () { state.style = "gfx"; save("style", "gfx"); renderStyle(); });
   $("sCap").addEventListener("click", function () { state.style = "cap"; save("style", "cap"); renderStyle(); });
   $("btnTpl").addEventListener("click", function () {
-    call("MS_pickMogrt()").then(function (o) { if (o.ok) { save("tpl", o.path); renderStyle(); status("템플릿: " + E.path.basename(o.path)); } });
+    call("MS_pickMogrt()").then(function (o) { if (o.ok) { save("tpl", o.path); scanTemplates(true); status("자막 모양: " + E.path.basename(o.path)); } });
   });
+  $("btnTplRefresh").addEventListener("click", function () { scanTemplates(true); });
+  $("btnTplFolder").addEventListener("click", function () { E.openTemplateFolder(); });
+  window.addEventListener("focus", function () { if (state.style === "gfx") scanTemplates(false); });
+  setInterval(function () { if (!state.busy && state.style === "gfx") scanTemplates(false); }, 3000);
   $("btnHelp").addEventListener("click", function () { var h = $("help"); h.style.display = h.style.display === "block" ? "none" : "block"; });
   $("chkReplace").checked = load("replace", "0") === "1";
   $("chkReplace").addEventListener("change", function () { save("replace", this.checked ? "1" : "0"); });
