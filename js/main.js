@@ -275,10 +275,22 @@
   $("btnSync").addEventListener("click", sync);
   $("btnStop").addEventListener("click", function () { state.stop = true; E.cancel(); });
 
-  // 첫 자막을 넣은 뒤 눈으로 확인 받기 (스크립트로는 그래픽 글자를 읽을 수 없어서)
-  function askConfirm() {
+  // 처음 넣은 자막(최대 2개)을 눈으로 확인 받기 — 스크립트로는 그래픽 글자를 읽을 수 없어서.
+  // 2개를 보는 이유: 원본 검증값을 남기는 방식이라, 프리미어가 예전 글자를 재사용하면 두 자막이 같은 글자로 보이므로 그걸 잡아냄
+  function askConfirm(list) {
     return new Promise(function (resolve) {
-      var box = $("confirm"); box.style.display = "block";
+      var box = $("confirm"), L = $("confirmList");
+      $("confirmMsg").textContent = list.length > 1 ? "자막 " + list.length + "개가 각각 아래 글자로 보이나요? [보기]로 확인해 주세요." : "자막이 아래 글자로 보이나요? [보기]로 확인해 주세요.";
+      L.innerHTML = "";
+      list.forEach(function (it, i) {
+        var row = document.createElement("div"); row.className = "rowbtn"; row.style.marginTop = "4px";
+        row.innerHTML = '<button>보기</button><span class="grow"></span>';
+        row.querySelector(".grow").textContent = (i + 1) + "번 · " + fmt(it.start) + " · 「" + it.text.replace(/\|/g, " ") + "」";
+        row.querySelector("button").onclick = function () { host("MS_seek(" + (it.start + Math.min(0.3, (it.end - it.start) / 2)).toFixed(3) + ")"); };
+        L.appendChild(row);
+      });
+      box.style.display = "block";
+      if (list[0]) host("MS_seek(" + (list[0].start + Math.min(0.3, (list[0].end - list[0].start) / 2)).toFixed(3) + ")");
       function done(v) { box.style.display = "none"; $("btnOkGo").onclick = $("btnNoStop").onclick = null; resolve(v); }
       $("btnOkGo").onclick = function () { done(true); };
       $("btnNoStop").onclick = function () { done(false); };
@@ -343,7 +355,7 @@
         status("V" + (vIdx + 1) + "에 자막 넣는 중… (" + (k + 1) + "/" + total + ")" + (first ? " — 첫 자막은 템플릿을 불러오느라 조금 걸려요" : ""));
         jr("줄 템플릿 만들기");
         var lineTpl;
-        try { lineTpl = E.makeLineTemplate(tpl, text, genDir, k + 1); }
+        try { lineTpl = E.makeLineTemplate(tpl, text, genDir, k + 1, { keepHash: true }); }   // 시험 결과: 원본 검증값을 남겨야 글자가 보임
         catch (e) { fail("자막 템플릿을 만들지 못했어요: " + e.message); }
         jr("올리기");
         return call("MS_import(" + q(lineTpl) + "," + vIdx + "," + it.start.toFixed(5) + ")").then(function (o1) {
@@ -378,15 +390,16 @@
         }).then(function (w) {
           if (!w.ok) fail(w.reason);
           k++;
-          if (first) {                                                // 그래픽 방식은 아직 시험 중이라 매번 첫 자막을 눈으로 확인
+          var checkN = Math.min(2, total);
+          if (placed.length === checkN) {                             // 처음 1~2개를 넣은 뒤 눈으로 확인
             E.journal(null);
-            host("MS_seek(" + (it.start + 0.05).toFixed(3) + ")");
-            status("첫 자막을 넣었어요. 프리미어 화면에서 글자가 「" + it.text.replace(/\|/g, " ") + "」로 보이는지 확인해 주세요.", "warn");
-            return askConfirm().then(function (ok) {
+            var shown = items.slice(0, checkN);
+            status("자막 " + checkN + "개를 넣었어요. 글자가 맞게 보이는지 확인해 주세요.", "warn");
+            return askConfirm(shown).then(function (ok) {
               if (!ok) {
-                return call("MS_removeOne(" + vIdx + "," + it.start.toFixed(5) + ")").then(function () {
-                  placed.pop();
-                  fail("넣은 첫 자막을 지웠어요. 어떻게 보였는지(캡처) Claude에게 보내 주세요.");
+                return call("MS_removeAt(" + vIdx + ",'" + placed.join(",") + "')").then(function () {
+                  placed.length = 0;
+                  fail("넣은 자막을 지웠어요. 어떻게 보였는지(예: 둘 다 같은 글자, 원래 템플릿 글자 등) Claude에게 알려 주세요.");
                 });
               }
               return sleep(200).then(next);
