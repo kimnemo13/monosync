@@ -207,7 +207,7 @@
   function renderMode() {
     var m = insertMode();
     $("mCap").className = m === "cap" ? "on" : ""; $("mGfx").className = m === "gfx" ? "on" : "";
-    $("capHelp").style.display = m === "cap" ? "block" : "none"; $("replaceRow").style.display = m === "gfx" ? "flex" : "none";
+    $("capHelp").style.display = m === "cap" ? "block" : "none"; $("replaceRow").style.display = m === "gfx" ? "flex" : "none"; $("gfxTestBox").style.display = m === "gfx" ? "block" : "none";
   }
   $("mCap").addEventListener("click", function () { save("insertMode", "cap"); renderMode(); });
   $("mGfx").addEventListener("click", function () { save("insertMode", "gfx"); renderMode(); });
@@ -378,7 +378,7 @@
         }).then(function (w) {
           if (!w.ok) fail(w.reason);
           k++;
-          if (first && load("genOK", "") !== "1") {                  // 처음 한 번은 눈으로 확인
+          if (first) {                                                // 그래픽 방식은 아직 시험 중이라 매번 첫 자막을 눈으로 확인
             E.journal(null);
             host("MS_seek(" + (it.start + 0.05).toFixed(3) + ")");
             status("첫 자막을 넣었어요. 프리미어 화면에서 글자가 「" + it.text.replace(/\|/g, " ") + "」로 보이는지 확인해 주세요.", "warn");
@@ -389,7 +389,6 @@
                   fail("넣은 첫 자막을 지웠어요. 어떻게 보였는지(캡처) Claude에게 보내 주세요.");
                 });
               }
-              save("genOK", "1");
               return sleep(200).then(next);
             });
           }
@@ -460,15 +459,42 @@
         });
       }, Promise.resolve()).then(function () {
         setBusy(false);
-        host("MS_seek(" + (at + 1) + ")");
-        diag(rep.join("\n"));
-        status("시퀀스 끝 뒤(" + fmt(at) + "~)에 시험 클립을 올렸어요. 재생헤드를 각 클립 위에 두고 글자가 보이는지(무슨 글자인지) 알려 주세요.", "warn");
+        diag("");
+        showTestPanel(cases, at, rep);
+        status("시험 클립 4개를 올렸어요. 아래에서 [보기]를 누르고, 화면에 글자가 보이는지 골라 주세요.", "warn");
       });
     }).catch(function (e) { setBusy(false); status(e.message, "err"); });
   });
+  function showTestPanel(cases, at, rep) {
+    var box = $("testPanel"), ans = {};
+    box.innerHTML = ""; box.style.display = "block";
+    var out = document.createElement("div"); out.className = "muted"; out.style.marginTop = "6px";
+    function summary() {
+      var lines = ["[그래픽 글자 시험 결과] monoSync v" + (U ? U.localVersion() : "?")];
+      cases.forEach(function (c, i) { lines.push(c.label + " (" + (i < 2 ? "짧은 글자" : "원본과 같은 길이") + ", " + (c.keepHash ? "원본 검증값" : "검증값 뺌") + "): " + (ans[i] || "아직 안 봄")); });
+      return lines.join("\n");
+    }
+    cases.forEach(function (c, i) {
+      var t = at + i * 10, row = document.createElement("div"), up = rep.join(" ").indexOf(c.label + ": 안 올라감") < 0;
+      row.className = "rowbtn";
+      row.innerHTML = '<button class="b1">보기</button><span class="grow"></span><button class="b2">글자 보임</button><button class="b3">안 보임</button>';
+      row.insertBefore(document.createTextNode(c.label + (up ? "" : " (안 올라감)")), row.children[1]);
+      row.querySelector(".b1").onclick = function () { host("MS_seek(" + (t + 1) + ")"); };
+      function pick(v, btn) { ans[i] = v; row.querySelector(".b2").style.background = row.querySelector(".b3").style.background = ""; btn.style.background = v === "글자 보임" ? "#2c6e3a" : "#6e2c2c"; out.textContent = summary(); }
+      row.querySelector(".b2").onclick = function () { pick("글자 보임", this); };
+      row.querySelector(".b3").onclick = function () { pick("안 보임", this); };
+      if (!up) { row.querySelector(".b1").disabled = true; ans[i] = "안 올라감"; }
+      box.appendChild(row);
+    });
+    var cp = document.createElement("div"); cp.className = "rowbtn";
+    cp.innerHTML = '<button class="primary">결과 복사</button><span class="muted">→ Claude에게 붙여넣어 보내 주세요</span>';
+    cp.querySelector("button").onclick = function () { E.clipWrite(summary()); status("결과를 복사했어요. Claude에게 붙여넣어 보내 주세요.", "ok"); };
+    box.appendChild(cp); box.appendChild(out); out.textContent = summary();
+    host("MS_seek(" + (at + 1) + ")");
+  }
   $("btnGfxTestDel").addEventListener("click", function () {
     if (!testStarts.length) { status("지울 시험 클립이 없어요.", "warn"); return; }
-    call("MS_removeAt(" + state.v + ",'" + testStarts.join(",") + "')").then(function (o) { status("시험 클립 " + (o.n || 0) + "개를 지웠어요.", "ok"); testStarts = []; });
+    call("MS_removeAt(" + state.v + ",'" + testStarts.join(",") + "')").then(function (o) { status("시험 클립 " + (o.n || 0) + "개를 지웠어요.", "ok"); testStarts = []; $("testPanel").style.display = "none"; });
   });
 
   function renderResult() {
