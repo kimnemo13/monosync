@@ -53,6 +53,8 @@
   .preset .pimg { height: 46px; background: #000 center/contain no-repeat; }
   .preset .pname { padding: 6px 8px 0; font-size: 13px; font-weight: 700; color: #f0d6f8; text-align: left; }
   .preset .pgo { padding: 2px 8px 7px; font-size: 10.5px; color: #9a8aa0; text-align: left; }
+  .refresh { background: #1d5fa0; border-color: #12406e; color: #fff; font-weight: 600; padding: 5px 10px; }
+  .refresh:hover:not(:disabled) { background: #2470bb; }
   .tplbar { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
   #tplGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; margin-top: 6px; max-height: 250px; overflow-y: auto; }
   .tcard { background: #1b1b1b; border: 2px solid #1b1b1b; border-radius: 4px; cursor: pointer; overflow: hidden; }
@@ -112,7 +114,7 @@
 
   <!-- 2. 트랙 -->
   <div class="sec">
-    <h3>2 · 트랙 <span class="right"><button id="btnRefresh" class="link">↻ 시퀀스 다시 읽기</button></span></h3>
+    <h3>2 · 트랙 <span class="right"><button id="btnRefresh" class="refresh">↻ 시퀀스 다시 읽기</button></span></h3>
     <div class="tline"><span class="lab">자막 넣을 곳</span><div class="chips" id="vChips"></div></div>
     <div class="tline"><span class="lab">음성</span><div class="chips" id="aChips"></div></div>
     <div class="tline"><span class="lab">범위</span>
@@ -131,20 +133,7 @@
         <span class="pgo">누르면 바로 싱크 ▶</span>
       </button>
     </div>
-    <div class="tline"><span class="lab">넣는 방식</span>
-      <div class="seg"><button id="mCap" class="on">캡션 트랙 (확실)</button><button id="mGfx">그래픽 클립 (시험 중)</button></div>
-    </div>
-    <div id="capHelp" class="muted" style="margin-top:6px; line-height:1.6">
-      새 캡션 트랙에 넣어요. <b>처음 한 번만</b>: 캡션 하나 선택 → 속성(에센셜 그래픽) 패널에서 폰트·크기·위치를 내레이션 자막처럼 맞추고 → <b>트랙 스타일 › 트랙 스타일 만들기</b>(이름: 내레이션). 다음부터는 트랙 스타일에서 '내레이션'만 고르면 돼요.<br>
-      그래픽 클립이 필요하면 캡션들을 선택 → <b>그래픽 및 타이틀 › 캡션을 그래픽으로 업그레이드</b>.
-    </div>
-    <div id="gfxTestBox" style="display:none; margin-top:8px; padding:8px 10px; background:#241b27; border:1px solid #4a2f52; border-radius:4px">
-      <div style="color:#e3c6ec; font-weight:600">그래픽 방식은 확인 중이에요</div>
-      <div class="muted" style="margin:3px 0 6px">처음 자막 2개를 넣은 뒤 글자가 맞는지 물어봐요. 아래 시험은 필요할 때만 쓰세요.</div>
-      <div class="rowbtn" style="margin-top:0"><button id="btnGfxTest">시험 클립 올리기</button><button id="btnGfxTestDel">시험 클립 지우기</button></div>
-      <div id="testPanel" style="display:none; margin-top:6px"></div>
-    </div>
-    <label class="chk" id="replaceRow" style="display:none"><input type="checkbox" id="chkReplace"> 범위 안에 이미 있는 자막 클립은 지우고 넣기</label>
+    <label class="chk" id="replaceRow"><input type="checkbox" id="chkReplace"> 범위 안에 이미 있는 자막 클립은 지우고 넣기</label>
     <div class="muted" style="margin-top:6px">싱크 전에 프로젝트를 자동 저장해요.</div>
   </div>
 

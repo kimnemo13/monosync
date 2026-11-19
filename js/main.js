@@ -203,15 +203,6 @@
   Array.prototype.forEach.call(document.querySelectorAll(".preset"), function (b) {
     b.addEventListener("click", function () { if (!state.busy) sync(); });     // 누르면 바로 싱크
   });
-  function insertMode() { return load("insertMode", "cap"); }
-  function renderMode() {
-    var m = insertMode();
-    $("mCap").className = m === "cap" ? "on" : ""; $("mGfx").className = m === "gfx" ? "on" : "";
-    $("capHelp").style.display = m === "cap" ? "block" : "none"; $("replaceRow").style.display = m === "gfx" ? "flex" : "none"; $("gfxTestBox").style.display = m === "gfx" ? "block" : "none";
-  }
-  $("mCap").addEventListener("click", function () { save("insertMode", "cap"); renderMode(); });
-  $("mGfx").addEventListener("click", function () { save("insertMode", "gfx"); renderMode(); });
-  renderMode();
   $("chkReplace").checked = load("replace", "0") === "1";
   $("chkReplace").addEventListener("change", function () { save("replace", this.checked ? "1" : "0"); });
 
@@ -264,7 +255,7 @@
       var r = state.result;
       if (opts().mode === "same" && r.overall < 0.35)
         throw new Error("음성과 자막이 거의 안 맞아요(" + Math.round(r.overall * 100) + "%). 음성 트랙(A" + (aIdx + 1) + ")과 음성 언어를 확인해 주세요. 번역 자막이면 세부 설정에서 '번역 자막'을 고르세요.");
-      return insertMode() === "gfx" ? placeGraphics(tpl, vIdx, rg) : placeCaptions();
+      return placeGraphics(tpl, vIdx, rg);
     }).then(function (msg) {
       progress(null); setBusy(false);
       if (msg) status(msg.text, msg.kind);
@@ -425,91 +416,6 @@
       return E.writeText(E.path.join(dir, nm), "﻿" + A.toSRT(state.result.items));
     });
   }
-  function placeCaptions() {
-    status("프로젝트 저장 중…");
-    return call("MS_saveProject()").then(function () { return saveSRT(); }).then(function (f) {
-      status("캡션 트랙 만드는 중…");
-      return call("MS_addCaptions(" + q(f) + ")").then(function (o) {
-        if (!o.ok) throw new Error(o.reason + "\n(SRT: " + f + ")");
-        state.placed = null;
-        var ng = state.result.items.filter(function (x) { return x.how === "guess"; }).length;
-        return { text: "새 캡션 트랙에 자막 " + state.result.items.length + "개를 넣었어요." + (ng ? " 음성에서 못 찾은 " + ng + "개는 주황색 — 추정 배치." : "") + " 트랙 스타일에서 '내레이션'을 고르면 모양이 적용돼요.", kind: ng ? "warn" : "ok" };
-      });
-    });
-  }
-
-  // 그래픽 글자 시험: 어떤 조건에서 글자가 보이는지 확인용 클립 4개
-  var testStarts = [];
-  $("btnGfxTest").addEventListener("click", function () {
-    if (state.busy) return;
-    var tpl = tplPath(), v = state.v;
-    var orig = E.templateText(tpl);
-    var same = Array.from(orig).map(function (ch, i) { return /[가-힣]/.test(ch) ? "시험같은길이글자"[i % 8] : ch; }).join("");   // 글자 수·바이트 수가 원본과 같음
-    var cases = [
-      { label: "시험1", text: "시험1 짧은 글자", keepHash: false },
-      { label: "시험2", text: "시험2 짧은 글자", keepHash: true },
-      { label: "시험3", text: same, keepHash: false },
-      { label: "시험4", text: same, keepHash: true }
-    ];
-    setBusy(true); diag("");
-    refresh().then(function () {
-      var at = Math.ceil((state.info ? state.info.end : 0) + 30), dir = E.newGenDir(), rep = ["[그래픽 글자 시험] V" + (v + 1) + ", " + fmt(at) + "부터 10초 간격"];
-      testStarts = [];
-      return cases.reduce(function (p, c, i) {
-        return p.then(function () {
-          var t = at + i * 10, f = E.makeLineTemplate(tpl, c.text, dir, 900 + i, { keepHash: c.keepHash, tag: "test" });
-          status("시험 클립 올리는 중… (" + (i + 1) + "/4)");
-          return call("MS_import(" + q(f) + "," + v + "," + t + ")").then(function () {
-            var n = 0;
-            function w() {
-              return sleep(300).then(function () { return call("MS_probe(" + v + "," + t + ")"); }).then(function (p2) {
-                if (p2.ok && p2.state !== "pending") { testStarts.push(t); rep.push(c.label + " (" + fmt(t) + ") 올라감 — 글자: " + c.text + (c.keepHash ? " · 원본 해시" : " · 해시 없음")); return; }
-                if (++n > 40) { rep.push(c.label + ": 안 올라감"); return; }
-                return w();
-              });
-            }
-            return w();
-          });
-        });
-      }, Promise.resolve()).then(function () {
-        setBusy(false);
-        diag("");
-        showTestPanel(cases, at, rep);
-        status("시험 클립 4개를 올렸어요. 아래에서 [보기]를 누르고, 화면에 글자가 보이는지 골라 주세요.", "warn");
-      });
-    }).catch(function (e) { setBusy(false); status(e.message, "err"); });
-  });
-  function showTestPanel(cases, at, rep) {
-    var box = $("testPanel"), ans = {};
-    box.innerHTML = ""; box.style.display = "block";
-    var out = document.createElement("div"); out.className = "muted"; out.style.marginTop = "6px";
-    function summary() {
-      var lines = ["[그래픽 글자 시험 결과] monoSync v" + (U ? U.localVersion() : "?")];
-      cases.forEach(function (c, i) { lines.push(c.label + " (" + (i < 2 ? "짧은 글자" : "원본과 같은 길이") + ", " + (c.keepHash ? "원본 검증값" : "검증값 뺌") + "): " + (ans[i] || "아직 안 봄")); });
-      return lines.join("\n");
-    }
-    cases.forEach(function (c, i) {
-      var t = at + i * 10, row = document.createElement("div"), up = rep.join(" ").indexOf(c.label + ": 안 올라감") < 0;
-      row.className = "rowbtn";
-      row.innerHTML = '<button class="b1">보기</button><span class="grow"></span><button class="b2">글자 보임</button><button class="b3">안 보임</button>';
-      row.insertBefore(document.createTextNode(c.label + (up ? "" : " (안 올라감)")), row.children[1]);
-      row.querySelector(".b1").onclick = function () { host("MS_seek(" + (t + 1) + ")"); };
-      function pick(v, btn) { ans[i] = v; row.querySelector(".b2").style.background = row.querySelector(".b3").style.background = ""; btn.style.background = v === "글자 보임" ? "#2c6e3a" : "#6e2c2c"; out.textContent = summary(); }
-      row.querySelector(".b2").onclick = function () { pick("글자 보임", this); };
-      row.querySelector(".b3").onclick = function () { pick("안 보임", this); };
-      if (!up) { row.querySelector(".b1").disabled = true; ans[i] = "안 올라감"; }
-      box.appendChild(row);
-    });
-    var cp = document.createElement("div"); cp.className = "rowbtn";
-    cp.innerHTML = '<button class="primary">결과 복사</button><span class="muted">→ Claude에게 붙여넣어 보내 주세요</span>';
-    cp.querySelector("button").onclick = function () { E.clipWrite(summary()); status("결과를 복사했어요. Claude에게 붙여넣어 보내 주세요.", "ok"); };
-    box.appendChild(cp); box.appendChild(out); out.textContent = summary();
-    host("MS_seek(" + (at + 1) + ")");
-  }
-  $("btnGfxTestDel").addEventListener("click", function () {
-    if (!testStarts.length) { status("지울 시험 클립이 없어요.", "warn"); return; }
-    call("MS_removeAt(" + state.v + ",'" + testStarts.join(",") + "')").then(function (o) { status("시험 클립 " + (o.n || 0) + "개를 지웠어요.", "ok"); testStarts = []; $("testPanel").style.display = "none"; });
-  });
 
   function renderResult() {
     var box = $("result"), r = state.result; box.innerHTML = "";

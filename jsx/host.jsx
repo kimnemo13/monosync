@@ -8,7 +8,6 @@
 //   MS_place(mogrt, vIdx, s, e, text)     템플릿(.mogrt)을 s초에 올리고 길이·글자 맞춤 (비동기면 pending)
 //   MS_fill(vIdx, s, e, text)             pending 된 클립을 찾아 길이·글자 맞춤
 //   MS_removeAt(vIdx, starts)             방금 넣은 자막 지우기(되돌리기)
-//   MS_addCaptions(srt)                   캡션 트랙으로 넣기(대안)
 // ※ 한글은 evalScript 브릿지에서 깨질 수 있어 encodeURIComponent로 주고받는다.
 // ※ ES3: var만, JSON 객체 없음. 모든 함수는 JSON "문자열"을 돌려준다.
 
@@ -342,33 +341,3 @@ function MS_pickMogrt() {
     } catch (e) { return MS_fail(String(e)); }
 }
 
-function MS_findByPath(bin, path) {
-    for (var i = bin.children.numItems - 1; i >= 0; i--) {
-        var it = bin.children[i];
-        if (it.type === ProjectItemType.BIN) { var f = MS_findByPath(it, path); if (f) return f; }
-        else { var mp = ""; try { mp = String(it.getMediaPath()); } catch (e) {} if (mp === path) return it; }
-    }
-    return null;
-}
-function MS_getBin(name) {
-    var root = app.project.rootItem;
-    for (var i = 0; i < root.children.numItems; i++) {
-        var it = root.children[i];
-        if (it.type === ProjectItemType.BIN && String(it.name) === name) return it;
-    }
-    return root.createBin(name);
-}
-function MS_addCaptions(pathEnc) {
-    try {
-        var path = decodeURIComponent(pathEnc), seq = MS_seq();
-        if (!seq) return MS_fail("열려 있는 시퀀스가 없어요.");
-        var bin = MS_getBin("monoSync 자막");
-        app.project.importFiles([path], true, bin, false);
-        var item = MS_findByPath(bin, path) || MS_findByPath(app.project.rootItem, path);
-        if (!item) return MS_fail("SRT를 프로젝트로 가져오지 못했어요.");
-        if (typeof seq.createCaptionTrack !== "function") return MS_fail("이 프리미어 버전은 스크립트로 캡션 트랙을 못 만들어요. 'monoSync 자막' 빈의 SRT를 타임라인에 끌어다 놓아 주세요.");
-        var fmt; try { fmt = Sequence.CAPTION_FORMAT_SUBTITLE; } catch (eF) {}
-        if (fmt !== undefined) seq.createCaptionTrack(item, 0, fmt); else seq.createCaptionTrack(item, 0);
-        return '{"ok":true}';
-    } catch (e) { return MS_fail("캡션 넣기 실패: " + e); }
-}
